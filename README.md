@@ -210,6 +210,44 @@ export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 ```
 
+如果你在 **Windows** 上使用 `PowerShell`，可改为：
+
+```powershell
+$env:BUN_INSTALL = "$HOME\.bun"
+$env:PATH = "$env:BUN_INSTALL\bin;$env:PATH"
+```
+
+如果希望对当前用户永久生效，可执行：
+
+```powershell
+[System.Environment]::SetEnvironmentVariable('BUN_INSTALL', "$HOME\.bun", 'User')
+[System.Environment]::SetEnvironmentVariable(
+  'PATH',
+  "$HOME\.bun\bin;" + [System.Environment]::GetEnvironmentVariable('PATH', 'User'),
+  'User'
+)
+```
+
+如果你使用的是 `cmd`，则对应写法为：
+
+```cmd
+set BUN_INSTALL=%USERPROFILE%\.bun
+set PATH=%BUN_INSTALL%\bin;%PATH%
+```
+
+永久设置可使用：
+
+```cmd
+setx BUN_INSTALL "%USERPROFILE%\.bun"
+setx PATH "%USERPROFILE%\.bun\bin;%PATH%"
+```
+
+说明：
+
+  * `export` / `$env:` / `set` 只对当前终端会话生效
+  * `SetEnvironmentVariable(..., 'User')` / `setx` 会写入用户环境变量，需重新打开终端
+  * Windows 的 `PATH` 分隔符是 `;`，不是 `:`
+
 可通过以下命令进行环境自检：
 
 ```bash
