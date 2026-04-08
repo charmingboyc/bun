@@ -21,9 +21,8 @@
 
 更新于 **2026 年 4 月 8 日**
 
-- ⭐ 支持 Responses API 缓存命中，显著降低成本并提速。
-- 修复当 API BaseURL 使用 `IP + 端口` 形式时，兼容 Provider 被错误降级为 Anthropic 路径，导致请求失败的问题。
-- 修复多轮工具调用与 Plan Mode 自动切换场景下，API 请求异常失败的问题。
+- ⭐ **支持 `/context` 上下文来源显示与上下文窗口上限手动设置。**
+- ⭐ **支持 Responses API 缓存命中，显著降低成本并提速。**
 
 更多历史更新与细节说明请跳转查看：[详细更新日志](#详细更新日志)
 
@@ -166,7 +165,9 @@
 为了保证多环境下的稳定性，本项目将所有用户数据严格收口至：
 
   * **配置根目录**：`~/.cloai`
-  * **全局配置文件**：`~/.cloai/.claude.json`
+  * **用户级配置文件**：`~/.cloai/settings.json`
+  * **项目级配置文件**：`.claude/settings.json`
+  * **本地项目配置文件**：`.claude/settings.local.json`
 
 **架构收益：**
 
@@ -176,6 +177,108 @@
   * 为多环境（开发/生产）提供极其便捷的独立配置与备份手段。
 
 对于需要长期维护多套底层环境的开发者而言，这种物理隔离设计将显著降低日常排障成本。🧰
+
+### 上下文窗口配置方式
+
+目前上下文窗口上限可以通过两种方式控制：
+
+#### 1. 通过 `/config` 交互设置（推荐）
+
+在命令行中输入：
+
+```text
+/config
+```
+
+然后进入：
+
+```text
+Config → Context window override
+```
+
+切换方式：
+
+- 使用 **← / → 方向键** 切换选项
+- 或使用 **空格键** 循环切换当前选项
+
+可选模式如下：
+
+- `Auto`
+  - 使用程序默认判断逻辑
+  - Claude 官方模型继续走官方 capability / beta / experiment 逻辑
+  - 命中本地模型注册表的兼容模型会按注册表上限计算
+  - 未命中时回退为默认 `200k`
+- `4k`
+  - 强制将上下文窗口视为 `4,000 tokens`
+- `32k`
+  - 强制将上下文窗口视为 `32,000 tokens`
+- `200k`
+  - 强制将上下文窗口视为 `200,000 tokens`
+- `1M`
+  - 强制将上下文窗口视为 `1,000,000 tokens`
+
+切换完成后，设置会写入：
+
+```text
+.claude/settings.local.json
+```
+
+也就是说，这个 override 默认是**当前项目本地生效**，不会污染全局设置。
+
+#### 2. 直接修改配置文件
+
+如果你更喜欢手动改文件，也可以直接编辑：
+
+```json
+{
+  "modelContextWindowOverride": "auto"
+}
+```
+
+支持的取值为：
+
+```json
+"auto" | "4k" | "32k" | "200k" | "1m"
+```
+
+示例：
+
+```json
+{
+  "modelContextWindowOverride": "1m"
+}
+```
+
+这表示：无论当前模型的默认窗口是多少，都强制按 `1M` 上下文窗口计算。
+
+如果要恢复自动判断，改回：
+
+```json
+{
+  "modelContextWindowOverride": "auto"
+}
+```
+
+### `/context` 显示逻辑说明
+
+执行：
+
+```text
+/context
+```
+
+时，顶部会显示当前上下文使用量与上限。
+
+其中：
+
+- **`[API]`** 表示顶部总量来自 transcript 中最近一次有效 API usage
+- **`[Est]`** 表示当前无法取得有效 API usage，因此回退为本地估算
+
+注意：
+
+- 顶部总量与百分比优先使用 API usage
+- 下方 `Estimated usage by category` 仍然主要是**按类别估算**
+- 因此顶部总量与 `Messages` 分项不一定完全相等，这是正常现象
 
 -----
 
@@ -442,6 +545,10 @@ cloai
 
 ### 2026 年 4 月 8 日更新
 
+- 修复 `/context` 上下文用量计算不一致的问题，统一 runtime model 下的 autocompact buffer 口径，并在 API usage 缺失或为 0 时正确回退到本地估算，避免显示异常偏小或 0 的总量。
+- 新增 `/context` 顶部来源标记，区分当前总量来自 API usage 还是本地估算，方便判断兼容模型的 usage 是否正常落盘。
+- 新增上下文窗口手动 override：可在 `/config → Context window override` 中通过 **← / → 方向键** 或 **空格键** 在 `Auto / 4k / 32k / 200k / 1M` 之间切换，并写入 `.claude/settings.local.json`。
+- 完善上下文配置说明，补充用户级 / 项目级 / 本地项目级配置文件路径，以及 `modelContextWindowOverride` 的手动配置方式。
 - 修复当 API BaseURL 使用 `IP + 端口` 形式时，兼容 Provider 被错误降级为 Anthropic 路径，导致请求失败的问题。
 - 修复多轮工具调用与 Plan Mode 自动切换场景下，API 请求异常失败的问题。
 
