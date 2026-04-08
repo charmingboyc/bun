@@ -329,8 +329,7 @@ export function Config({
       setCustomModelValue(nextValue);
       setGlobalConfig(getGlobalConfig());
     }
-  },
-  {
+  }, {
     id: 'autoCompactEnabled',
     label: 'Auto-compact',
     value: globalConfig.autoCompactEnabled,
@@ -346,6 +345,28 @@ export function Config({
       });
       logEvent('tengu_auto_compact_setting_changed', {
         enabled: autoCompactEnabled
+      });
+    }
+  }, {
+    id: 'modelContextWindowOverride',
+    label: 'Context window override',
+    value: settingsData?.modelContextWindowOverride ?? 'auto',
+    options: ['auto', '4k', '32k', '200k', '1m'],
+    type: 'enum' as const,
+    onChange(modelContextWindowOverride: string) {
+      const nextValue =
+        modelContextWindowOverride === 'auto'
+          ? undefined
+          : (modelContextWindowOverride as '4k' | '32k' | '200k' | '1m');
+      updateSettingsForSource('localSettings', {
+        modelContextWindowOverride: nextValue
+      });
+      setSettingsData(prev_3 => ({
+        ...prev_3,
+        modelContextWindowOverride: nextValue
+      }));
+      logEvent('tengu_context_window_override_changed', {
+        value: modelContextWindowOverride as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
       });
     }
   }, {

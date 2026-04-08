@@ -133,6 +133,9 @@ export type OpenAIChatRequest = {
   model: string
   messages: OpenAIChatMessage[]
   stream?: boolean
+  stream_options?: {
+    include_usage?: boolean
+  }
   temperature?: number
   tools?: Array<{
     type: 'function'
@@ -289,6 +292,12 @@ type OpenAIStreamChunk = {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+    }
+    input_tokens_details?: {
+      cached_tokens?: number
+    }
   }
 }
 
@@ -960,7 +969,7 @@ export function convertAnthropicRequestToOpenAI(input: {
     model: targetModel,
     messages,
     temperature: input.temperature,
-    max_tokens: input.max_tokens,
+    stream_options: { include_usage: true },
     ...(reasoning?.reasoningEffort
       ? {
           reasoning_effort:
@@ -1433,7 +1442,8 @@ export async function* createAnthropicStreamFromOpenAI(input: {
 
         if (!started) {
           started = true
-          promptTokens = chunk.usage?.prompt_tokens ?? 0
+          const mappedUsage = mapOpenAIUsageToAnthropic(chunk.usage)
+          promptTokens = mappedUsage?.input_tokens ?? chunk.usage?.prompt_tokens ?? 0
           yield {
             type: 'message_start',
             message: {
@@ -1444,10 +1454,11 @@ export async function* createAnthropicStreamFromOpenAI(input: {
               content: [],
               stop_reason: null,
               stop_sequence: null,
-              usage: {
-                input_tokens: promptTokens,
-                output_tokens: 0,
-              },
+              usage:
+                mappedUsage ?? {
+                  input_tokens: promptTokens,
+                  output_tokens: 0,
+                },
             },
           } as BetaRawMessageStreamEvent
         }
@@ -1568,7 +1579,9 @@ export async function* createAnthropicStreamFromOpenAI(input: {
               index: emptyTextIndex,
             } as BetaRawMessageStreamEvent
           }
-          completionTokens = chunk.usage?.completion_tokens ?? completionTokens
+          const mappedUsage = mapOpenAIUsageToAnthropic(chunk.usage)
+          promptTokens = mappedUsage?.input_tokens ?? promptTokens
+          completionTokens = mappedUsage?.output_tokens ?? chunk.usage?.completion_tokens ?? completionTokens
           for (const index of openContentIndices) {
             yield {
               type: 'content_block_stop',
@@ -1582,9 +1595,10 @@ export async function* createAnthropicStreamFromOpenAI(input: {
               stop_reason: mapFinishReason(choice.finish_reason),
               stop_sequence: null,
             },
-            usage: {
-              output_tokens: completionTokens,
-            },
+            usage:
+              mappedUsage ?? {
+                output_tokens: completionTokens,
+              },
           } as BetaRawMessageStreamEvent
 
           yield {
@@ -1599,10 +1613,11 @@ export async function* createAnthropicStreamFromOpenAI(input: {
             content: [],
             stop_reason: mapFinishReason(choice.finish_reason),
             stop_sequence: null,
-            usage: {
-              input_tokens: promptTokens,
-              output_tokens: completionTokens,
-            },
+            usage:
+              mappedUsage ?? {
+                input_tokens: promptTokens,
+                output_tokens: completionTokens,
+              },
           } as BetaMessage
         }
       }
@@ -1692,6 +1707,8 @@ export async function* createAnthropicStreamFromOpenAIResponses(input: {
               usage: {
                 input_tokens: 0,
                 output_tokens: 0,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
               },
             },
           } as BetaRawMessageStreamEvent
@@ -1796,8 +1813,9 @@ export async function* createAnthropicStreamFromOpenAIResponses(input: {
 
         if (event.type === 'response.completed') {
           attachOpenAIResponsesUsageDebug(event.response?.usage)
-          promptTokens = event.response?.usage?.input_tokens ?? 0
-          completionTokens = event.response?.usage?.output_tokens ?? 0
+          const mappedUsage = mapOpenAIResponsesUsageToAnthropic(event.response?.usage)
+          promptTokens = mappedUsage?.input_tokens ?? event.response?.usage?.input_tokens ?? 0
+          completionTokens = mappedUsage?.output_tokens ?? event.response?.usage?.output_tokens ?? 0
           for (const index of allocator.getOpenIndices()) {
             yield {
               type: 'content_block_stop',
@@ -1810,9 +1828,10 @@ export async function* createAnthropicStreamFromOpenAIResponses(input: {
               stop_reason: stopReason,
               stop_sequence: null,
             },
-            usage: {
-              output_tokens: completionTokens,
-            },
+            usage:
+              mappedUsage ?? {
+                output_tokens: completionTokens,
+              },
           } as BetaRawMessageStreamEvent
           yield {
             type: 'message_stop',
@@ -1825,10 +1844,11 @@ export async function* createAnthropicStreamFromOpenAIResponses(input: {
             content: [],
             stop_reason: stopReason,
             stop_sequence: null,
-            usage: {
-              input_tokens: promptTokens,
-              output_tokens: completionTokens,
-            },
+            usage:
+              mappedUsage ?? {
+                input_tokens: promptTokens,
+                output_tokens: completionTokens,
+              },
           } as BetaMessage
         }
       }
@@ -1846,6 +1866,22 @@ export async function* createAnthropicStreamFromOpenAICodex(input: {
 }): AsyncGenerator<BetaRawMessageStreamEvent, BetaMessage, void> {
   yield* createAnthropicStreamFromOpenAIResponses(input)
 }
+
+function mapOpenAIResponsesUsageToAnthropic(usage?: {
+  input_tokens?: number
+  output_tokens?: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  input_tokens_details?: {
+    cached_tokens?: number
+  }
+  prompt_tokens_details?: {
+    cached_tokens?: number
+  }
+}): BetaUsage | undefined {
+  return mapOpenAIUsageToAnthropic(usage)
+}
+
 export function mapOpenAIUsageToAnthropic(usage?: {
   prompt_tokens?: number
   completion_tokens?: number
@@ -1859,7 +1895,7 @@ export function mapOpenAIUsageToAnthropic(usage?: {
   }
 }): BetaUsage | undefined {
   if (!usage) return undefined
-  const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
+  const totalInputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
   const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0
   const cachedTokens =
     usage.input_tokens_details?.cached_tokens ??
@@ -1867,9 +1903,10 @@ export function mapOpenAIUsageToAnthropic(usage?: {
     0
 
   return {
-    input_tokens: inputTokens,
+    input_tokens: Math.max(0, totalInputTokens - cachedTokens),
     output_tokens: outputTokens,
-    cache_creation_input_tokens: Math.max(0, inputTokens - cachedTokens),
+    cache_creation_input_tokens: 0,
     cache_read_input_tokens: cachedTokens,
   } as BetaUsage
 }
+

@@ -4,6 +4,8 @@ import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { getModelCapability } from './model/modelCapabilities.js'
+import { getModelContextWindowFromRegistry } from './model/modelRegistry.js'
+import { getSettings_DEPRECATED } from './settings/settings.js'
 
 // Model context window size (200k tokens for all models right now)
 export const MODEL_CONTEXT_WINDOW_DEFAULT = 200_000
@@ -24,6 +26,13 @@ const MAX_OUTPUT_TOKENS_UPPER_LIMIT = 64_000
 export const CAPPED_DEFAULT_MAX_TOKENS = 8_000
 export const ESCALATED_MAX_TOKENS = 64_000
 
+export type ContextWindowOverrideSetting =
+  | 'auto'
+  | '4k'
+  | '32k'
+  | '200k'
+  | '1m'
+
 /**
  * Check if 1M context is disabled via environment variable.
  * Used by C4E admins to disable 1M context for HIPAA compliance.
@@ -37,6 +46,24 @@ export function has1mContext(model: string): boolean {
     return false
   }
   return /\[1m\]/i.test(model)
+}
+
+export function parseContextWindowOverride(
+  value: string | undefined,
+): number | undefined {
+  switch (value) {
+    case '4k':
+      return 4_000
+    case '32k':
+      return 32_000
+    case '200k':
+      return 200_000
+    case '1m':
+      return 1_000_000
+    case 'auto':
+    default:
+      return undefined
+  }
 }
 
 // @[MODEL LAUNCH]: Update this pattern if the new model supports 1M context
@@ -64,6 +91,14 @@ export function getContextWindowForModel(
     if (!isNaN(override) && override > 0) {
       return override
     }
+  }
+
+  const settings = getSettings_DEPRECATED() || {}
+  const userOverride = parseContextWindowOverride(
+    settings.modelContextWindowOverride as string | undefined,
+  )
+  if (userOverride !== undefined) {
+    return userOverride
   }
 
   // [1m] suffix — explicit client-side opt-in, respected over all detection
@@ -94,6 +129,12 @@ export function getContextWindowForModel(
       return antModel.contextWindow
     }
   }
+
+  const registryWindow = getModelContextWindowFromRegistry(model)
+  if (registryWindow !== undefined) {
+    return registryWindow
+  }
+
   return MODEL_CONTEXT_WINDOW_DEFAULT
 }
 

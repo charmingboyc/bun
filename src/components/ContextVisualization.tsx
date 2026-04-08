@@ -114,6 +114,7 @@ export function ContextVisualization(t0) {
     percentage,
     gridRows,
     model,
+    usageSource,
     memoryFiles,
     mcpTools,
     deferredBuiltinTools: t1,
@@ -189,33 +190,35 @@ export function ContextVisualization(t0) {
       t14 = $[29];
     }
     let t15;
-    if ($[30] !== model || $[31] !== percentage || $[32] !== t13 || $[33] !== t14) {
-      t15 = <Text dimColor={true}>{model} · {t13}/{t14}{" "}tokens ({percentage}%)</Text>;
+    const usageSourceLabel = usageSource === 'api' ? '[API]' : '[Est]';
+    if ($[30] !== model || $[31] !== percentage || $[32] !== t13 || $[33] !== t14 || $[34] !== usageSourceLabel) {
+      t15 = <Text dimColor={true}>{model} · {t13}/{t14}{" "}tokens ({percentage}%) {usageSourceLabel}</Text>;
       $[30] = model;
       $[31] = percentage;
       $[32] = t13;
       $[33] = t14;
-      $[34] = t15;
+      $[34] = usageSourceLabel;
+      $[35] = t15;
     } else {
-      t15 = $[34];
+      t15 = $[35];
     }
     let t16;
     let t17;
     let t18;
-    if ($[35] === Symbol.for("react.memo_cache_sentinel")) {
+    if ($[60] === Symbol.for("react.memo_cache_sentinel")) {
       t16 = <CollapseStatus />;
       t17 = <Text> </Text>;
       t18 = <Text dimColor={true} italic={true}>Estimated usage by category</Text>;
-      $[35] = t16;
-      $[36] = t17;
-      $[37] = t18;
+      $[60] = t16;
+      $[61] = t17;
+      $[62] = t18;
     } else {
-      t16 = $[35];
-      t17 = $[36];
-      t18 = $[37];
+      t16 = $[60];
+      t17 = $[61];
+      t18 = $[62];
     }
     let t19;
-    if ($[38] !== rawMaxTokens) {
+    if ($[63] !== rawMaxTokens) {
       t19 = (cat_2, index) => {
         const tokenDisplay = formatTokens(cat_2.tokens);
         const percentDisplay = cat_2.isDeferred ? "N/A" : `${(cat_2.tokens / rawMaxTokens * 100).toFixed(1)}%`;
@@ -224,40 +227,40 @@ export function ContextVisualization(t0) {
         const symbol = cat_2.isDeferred ? " " : isReserved ? "\u26DD" : "\u26C1";
         return <Box key={index}><Text color={cat_2.color}>{symbol}</Text><Text> {displayName}: </Text><Text dimColor={true}>{tokenDisplay} tokens ({percentDisplay})</Text></Box>;
       };
-      $[38] = rawMaxTokens;
-      $[39] = t19;
+      $[63] = rawMaxTokens;
+      $[64] = t19;
     } else {
-      t19 = $[39];
+      t19 = $[64];
     }
     const t20 = visibleCategories.map(t19);
     let t21;
-    if ($[40] !== categories || $[41] !== rawMaxTokens) {
+    if ($[65] !== categories || $[66] !== rawMaxTokens) {
       t21 = (categories.find(_temp6)?.tokens ?? 0) > 0 && <Box><Text dimColor={true}>⛶</Text><Text> Free space: </Text><Text dimColor={true}>{formatTokens(categories.find(_temp7)?.tokens || 0)}{" "}({((categories.find(_temp8)?.tokens || 0) / rawMaxTokens * 100).toFixed(1)}%)</Text></Box>;
-      $[40] = categories;
-      $[41] = rawMaxTokens;
-      $[42] = t21;
+      $[65] = categories;
+      $[66] = rawMaxTokens;
+      $[67] = t21;
     } else {
-      t21 = $[42];
+      t21 = $[67];
     }
     const t22 = autocompactCategory && autocompactCategory.tokens > 0 && <Box><Text color={autocompactCategory.color}>⛝</Text><Text dimColor={true}> {autocompactCategory.name}: </Text><Text dimColor={true}>{formatTokens(autocompactCategory.tokens)} tokens ({(autocompactCategory.tokens / rawMaxTokens * 100).toFixed(1)}%)</Text></Box>;
     let t23;
-    if ($[43] !== t15 || $[44] !== t20 || $[45] !== t21 || $[46] !== t22) {
+    if ($[68] !== t15 || $[69] !== t20 || $[70] !== t21 || $[71] !== t22) {
       t23 = <Box flexDirection="column" gap={0} flexShrink={0}>{t15}{t16}{t17}{t18}{t20}{t21}{t22}</Box>;
-      $[43] = t15;
-      $[44] = t20;
-      $[45] = t21;
-      $[46] = t22;
-      $[47] = t23;
+      $[68] = t15;
+      $[69] = t20;
+      $[70] = t21;
+      $[71] = t22;
+      $[72] = t23;
     } else {
-      t23 = $[47];
+      t23 = $[72];
     }
-    if ($[48] !== t12 || $[49] !== t23) {
+    if ($[73] !== t12 || $[74] !== t23) {
       t9 = <Box flexDirection="row" gap={2}>{t12}{t23}</Box>;
-      $[48] = t12;
-      $[49] = t23;
-      $[50] = t9;
+      $[73] = t12;
+      $[74] = t23;
+      $[75] = t9;
     } else {
-      t9 = $[50];
+      t9 = $[75];
     }
     T0 = Box;
     t2 = "column";

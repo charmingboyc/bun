@@ -376,6 +376,12 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Override the default model used by Claude Code'),
+      modelContextWindowOverride: z
+        .enum(['auto', '4k', '32k', '200k', '1m'])
+        .optional()
+        .describe(
+          'Override the model context window used for local context accounting. Use auto to follow provider/model detection.',
+        ),
       // Enterprise allowlist of models
       availableModels: z
         .array(z.string())

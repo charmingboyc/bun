@@ -195,6 +195,7 @@ export interface ContextData {
   readonly percentage: number
   readonly gridRows: GridSquare[][]
   readonly model: string
+  readonly usageSource: 'api' | 'estimated'
   readonly memoryFiles: MemoryFile[]
   readonly mcpTools: McpTool[]
   /** Ant-only: per-tool breakdown of deferred built-in tools */
@@ -1176,6 +1177,7 @@ export async function analyzeContextUsage(
   // Status line uses: input_tokens + cache_creation_input_tokens + cache_read_input_tokens
   const totalFromAPI = apiUsage
     ? apiUsage.input_tokens +
+      apiUsage.output_tokens +
       apiUsage.cache_creation_input_tokens +
       apiUsage.cache_read_input_tokens
     : null
@@ -1185,6 +1187,8 @@ export async function analyzeContextUsage(
   // usage snapshot exists; using it would incorrectly override the estimated
   // context total and show `0 / N` despite non-zero category estimates below.
   const hasMeaningfulApiUsage = totalFromAPI !== null && totalFromAPI > 0
+
+  const usageSource = hasMeaningfulApiUsage ? 'api' : 'estimated'
 
   // Use API total if available, otherwise fall back to estimated total
   const finalTotalTokens = hasMeaningfulApiUsage
@@ -1366,6 +1370,7 @@ export async function analyzeContextUsage(
     percentage: Number(((finalTotalTokens / contextWindow) * 100).toFixed(1)),
     gridRows,
     model: runtimeModel,
+    usageSource,
     memoryFiles: memoryFileDetails,
     mcpTools: mcpToolDetails,
     deferredBuiltinTools:

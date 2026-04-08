@@ -602,6 +602,10 @@ function mapGeminiUsage(usage?: GeminiUsageMetadata) {
   }
 }
 
+function toGeminiStartUsage(usage?: GeminiUsageMetadata) {
+  return mapGeminiUsage(usage)
+}
+
 export async function* createAnthropicStreamFromGemini(input: {
   reader: ReadableStreamDefaultReader<Uint8Array>
   model: string
@@ -619,6 +623,7 @@ export async function* createAnthropicStreamFromGemini(input: {
   const openContentIndices: number[] = []
   const toolIndices = new Set<number>()
   let empty = true
+  let latestUsage = mapGeminiUsage()
 
   function allocateContentIndex(): number {
     return nextContentIndex++
@@ -648,6 +653,8 @@ export async function* createAnthropicStreamFromGemini(input: {
 
         if (!started) {
           started = true
+          const startUsage = toGeminiStartUsage(chunk.usageMetadata)
+          latestUsage = startUsage
           yield {
             type: 'message_start',
             message: {
@@ -658,10 +665,7 @@ export async function* createAnthropicStreamFromGemini(input: {
               content: [],
               stop_reason: null,
               stop_sequence: null,
-              usage: {
-                input_tokens: 0,
-                output_tokens: 0,
-              },
+              usage: startUsage,
             },
           } as BetaRawMessageStreamEvent
         }
@@ -778,8 +782,9 @@ export async function* createAnthropicStreamFromGemini(input: {
         }
 
         if (chunk.usageMetadata) {
-          promptTokens = mapGeminiUsage(chunk.usageMetadata).input_tokens
-          completionTokens = mapGeminiUsage(chunk.usageMetadata).output_tokens
+          latestUsage = mapGeminiUsage(chunk.usageMetadata)
+          promptTokens = latestUsage.input_tokens
+          completionTokens = latestUsage.output_tokens
         }
 
         if (candidate?.finishReason && stopReason !== 'tool_use') {
@@ -800,10 +805,7 @@ export async function* createAnthropicStreamFromGemini(input: {
         content: [],
         stop_reason: null,
         stop_sequence: null,
-        usage: {
-          input_tokens: 0,
-          output_tokens: 0,
-        },
+        usage: latestUsage,
       },
     } as BetaRawMessageStreamEvent
   }
@@ -825,9 +827,7 @@ export async function* createAnthropicStreamFromGemini(input: {
       stop_reason: stopReason,
       stop_sequence: null,
     },
-    usage: {
-      output_tokens: completionTokens,
-    },
+    usage: latestUsage,
   } as BetaRawMessageStreamEvent
 
   yield {
@@ -842,10 +842,7 @@ export async function* createAnthropicStreamFromGemini(input: {
     content: [],
     stop_reason: stopReason,
     stop_sequence: null,
-    usage: {
-      input_tokens: promptTokens,
-      output_tokens: completionTokens,
-    },
+    usage: latestUsage,
   } as BetaMessage
 }
 
