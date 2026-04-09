@@ -60,33 +60,93 @@
 
 -----
 
-## 🚀 核心增强特性
+## 🚀 `/login` 与 `/model` 命令快速入门
 
-相比上游版本，本项目目前重点重构并增强了以下能力：
+本项目提供两条关键命令来完成鉴权与模型管理：
 
-### 1\. 原生多 Provider 接入
+### 1\. `/login` — 绑定 Provider 与鉴权方式
 
-支持在程序内部直接配置并无缝切换不同的 Provider，彻底摆脱对外部切换层的依赖。
+`/login` 用于在 CLI 内部完成 Provider 鉴权配置，适合 API Key、OAuth 或自定义兼容网关登录流程。
 
-### 2\. 原生多鉴权模式隔离
+#### 基本使用
 
-针对不同 Provider，支持独立持久化存储其对应的鉴权方式。有效解决“相同 Provider 却被错误复用 authMode”的历史遗留问题。
+```text
+/login
+```
 
-### 3\. 自定义模型与列表管理
+执行后，CLI 会依次提示：
 
-提供更便捷的非默认模型接入方案。支持轻松维护本地模型列表，并在交互进程中实现即时点选。
+  * 选择 Provider 类型（例如 Anthropic-compatible、OpenAI-compatible、Gemini-compatible 等）
+  * 选择鉴权方式（API Key、OAuth、或其他自定义模式）
+  * 输入或粘贴对应的鉴权信息
 
-### 4\. 深度优化的 OpenAI 兼容协议
+#### 常见场景
 
-除了完善的 Anthropic 兼容路径外，本项目正在持续深化 OpenAI 侧的协议与路由能力，已支持：
+  * `API Key`：直接输入 `apiKey` 或 `accessToken`，适用于大多数兼容网关。
+  * `OAuth`：如果 Provider 支持 OAuth，CLI 会引导你完成授权流程并在本地保存令牌。
+  * 多 Provider 并存：每个 `Provider + authMode` 组合都会独立存储，避免鉴权信息错误复用。
 
-  * Chat Completions
-  * Responses
-  * OAuth(例如你购买了 ChatGPT Plus， 可以在这里使用)
+  * OpenAI-compatible 路径目前已支持 `Chat Completions`、`Responses` 与 `OAuth`，例如你有 ChatGPT Plus 时，也可以走对应 OAuth 能力接入。
 
-### 5\. 独立配置目录与数据沙盒
+#### 结果
 
-默认采用 `~/.cloai` 作为全局配置根目录，从物理层面避免与其他同类工具发生配置、缓存或登录态的碰撞与污染。
+登录成功后，鉴权信息会写入项目配置路径，如：
+
+  * `.claude/settings.local.json`
+  * `~/.cloai/settings.json`
+
+这意味着你可以在当前项目或全局环境中直接切换模型与 Provider，而无需重复登录。
+
+### 2\. `/model` — 选择、注册与管理模型
+
+`/model` 用于查看可用模型、切换当前模型，以及注册自定义模型信息。
+
+#### 基本使用
+
+```text
+/model
+```
+
+执行后，CLI 会显示：
+
+  * 当前可用模型列表
+  * 当前选中的模型
+  * 模型来源（Provider / gateway / 本地注册表）
+
+#### 切换模型
+
+在 `/model` 交互中，使用方向键选择目标模型，按回车确认即可。
+
+如果你希望切换到自定义网关中的某个模型，先使用 `/login` 绑定对应 Provider，再通过 `/model` 选择它。
+
+#### 注册自定义模型
+
+如果你的兼容网关暴露了非默认模型名称，可以在 `/model` 交互中添加自定义模型条目，或者直接编辑本地模型注册文件：
+
+```json
+{
+  "modelRegistry": [
+    {
+      "name": "gpt-5.4",
+      "provider": "OpenAI-compatible",
+      "baseURL": "https://your-gateway.example.com/v1",
+      "description": "Custom gateway model"
+    }
+  ]
+}
+```
+
+#### 推荐流程
+
+  1. 运行 `/login` 完成 Provider 鉴权
+  2. 运行 `/model` 选择目标模型
+  3. 在会话中直接开始提问、调用或测试
+
+#### 说明
+
+  * `/login` 负责“谁来提供模型”和“如何鉴权”。
+  * `/model` 负责“用哪个模型”和“如何映射当前会话”。
+  * 这两者配合使用，可以实现原生多 Provider、原生多鉴权、原生模型切换的闭环体验。
 
 -----
 
