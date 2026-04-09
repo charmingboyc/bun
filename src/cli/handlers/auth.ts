@@ -37,6 +37,7 @@ import { saveGlobalConfig } from '../../utils/config.js'
 import {
   getActiveProviderConfig,
   getProviderKeyFromConfig,
+  inferProviderVariant,
   readCustomApiStorage,
   writeCustomApiStorage,
 } from '../../utils/customApiStorage.js'
@@ -80,19 +81,22 @@ export async function installOAuthTokens(
     const normalizedToken = normalizeApiKeyForConfig(tokens.accessToken)
     const activeProvider = getActiveProviderConfig(previousStorage)
     const activeOpenAIProvider =
-      activeProvider?.kind === 'openai-like' && activeProvider.authMode === 'oauth'
+      activeProvider?.variant === 'openai-oauth' ||
+      (activeProvider?.kind === 'openai-like' && activeProvider.authMode === 'oauth')
         ? activeProvider
         : undefined
     const fallbackOpenAIProvider = providers.find(
       p =>
-        p.kind === 'openai-like' &&
-        p.id === previousStorage.providerId &&
-        p.authMode === 'oauth',
+        (p.variant === 'openai-oauth' ||
+          (p.kind === 'openai-like' && p.authMode === 'oauth')) &&
+        p.id === previousStorage.providerId,
     )
     const targetProvider =
       activeOpenAIProvider ??
       fallbackOpenAIProvider ??
-      providers.find(p => p.kind === 'openai-like' && p.authMode === 'oauth')
+      providers.find(
+        p => p.variant === 'openai-oauth' || (p.kind === 'openai-like' && p.authMode === 'oauth'),
+      )
 
     // Extract account ID from JWT and fetch available models
     const accountId = extractAccountIdFromToken(tokens.accessToken ?? '')
@@ -125,6 +129,15 @@ export async function installOAuthTokens(
           p === targetProvider
             ? {
                 ...p,
+                variant:
+                  p.variant ??
+                  inferProviderVariant({
+                    kind: p.kind,
+                    authMode: p.authMode,
+                    baseURL: p.baseURL,
+                    id: p.id,
+                    provider: 'openai',
+                  }),
                 apiKey: tokens.accessToken,
                 models: fetchedModels ?? p.models,
                 oauth: {
@@ -144,6 +157,7 @@ export async function installOAuthTokens(
           {
             id: 'openai',
             kind: 'openai-like' as const,
+            variant: 'openai-oauth' as const,
             authMode: 'oauth' as const,
             apiKey: tokens.accessToken,
             models: fetchedModels ?? [],
@@ -155,6 +169,7 @@ export async function installOAuthTokens(
     const effectiveProvider = targetProvider ?? {
       id: 'openai',
       kind: 'openai-like' as const,
+      variant: 'openai-oauth' as const,
       authMode: 'oauth' as const,
     }
     const activeModel =
@@ -169,6 +184,7 @@ export async function installOAuthTokens(
       activeModel,
       provider: 'openai' as const,
       providerKind: effectiveProvider.kind,
+      variant: effectiveProvider.variant,
       providerId: effectiveProvider.id,
       authMode: effectiveProvider.authMode,
       baseURL: targetProvider?.baseURL ?? previousStorage.baseURL,
@@ -187,6 +203,7 @@ export async function installOAuthTokens(
       customApiEndpoint: {
         ...(current.customApiEndpoint ?? {}),
         kind: normalizedOpenAIStorage.providerKind,
+        variant: normalizedOpenAIStorage.variant,
         providerId: normalizedOpenAIStorage.providerId,
         provider: 'openai',
         baseURL: normalizedOpenAIStorage.baseURL,
@@ -222,27 +239,41 @@ export async function installOAuthTokens(
     const providers = previousStorage.providers ?? []
     const activeProvider = getActiveProviderConfig(previousStorage)
     const activeGeminiProvider =
-      activeProvider?.kind === 'gemini-like' &&
-      activeProvider.authMode === 'gemini-cli-oauth'
+      activeProvider?.variant === 'gemini-cli-oauth' ||
+      activeProvider?.variant === 'gemini-antigravity-oauth' ||
+      (activeProvider?.kind === 'gemini-like' && activeProvider.authMode === 'gemini-cli-oauth')
         ? activeProvider
         : undefined
     const fallbackGeminiProvider = providers.find(
       p =>
-        p.kind === 'gemini-like' &&
-        p.id === previousStorage.providerId &&
-        p.authMode === 'gemini-cli-oauth',
+        (p.variant === 'gemini-cli-oauth' ||
+          p.variant === 'gemini-antigravity-oauth' ||
+          (p.kind === 'gemini-like' && p.authMode === 'gemini-cli-oauth')) &&
+        p.id === previousStorage.providerId,
     )
     const targetProvider =
       activeGeminiProvider ??
       fallbackGeminiProvider ??
       providers.find(
-        p => p.kind === 'gemini-like' && p.authMode === 'gemini-cli-oauth',
+        p =>
+          p.variant === 'gemini-cli-oauth' ||
+          p.variant === 'gemini-antigravity-oauth' ||
+          (p.kind === 'gemini-like' && p.authMode === 'gemini-cli-oauth'),
       )
     const updatedProviders = targetProvider
       ? providers.map(p =>
           p === targetProvider
             ? {
                 ...p,
+                variant:
+                  p.variant ??
+                  inferProviderVariant({
+                    kind: p.kind,
+                    authMode: p.authMode,
+                    baseURL: p.baseURL,
+                    id: p.id,
+                    provider: 'gemini',
+                  }),
                 oauth: {
                   ...p.oauth,
                   accessToken:
@@ -269,8 +300,27 @@ export async function installOAuthTokens(
               }
             : p,
         )
-      : providers
-
+      : [
+          ...providers,
+          {
+            id: previousStorage.providerId ?? 'gemini',
+            kind: 'gemini-like' as const,
+            variant: previousStorage.variant ?? 'gemini-cli-oauth',
+            authMode: (previousStorage.activeAuthMode ?? previousStorage.authMode ?? 'gemini-cli-oauth') as const,
+            models: previousStorage.savedModels ?? [],
+            oauth: {
+              accessToken:
+                typeof tokens.accessToken === 'string' ? tokens.accessToken : undefined,
+              refreshToken:
+                typeof tokens.refreshToken === 'string' ? tokens.refreshToken : undefined,
+              expiresAt:
+                typeof tokens.expiresAt === 'number' ? tokens.expiresAt : undefined,
+              projectId:
+                typeof tokens.projectId === 'string' ? tokens.projectId : undefined,
+              email: typeof tokens.email === 'string' ? tokens.email : undefined,
+            },
+          },
+        ]
     const activeModel =
       previousStorage.activeProvider === targetProvider?.id
         ? previousStorage.activeModel
@@ -286,6 +336,7 @@ export async function installOAuthTokens(
       activeAuthMode: targetProvider?.authMode ?? previousStorage.activeAuthMode,
       provider: 'gemini' as const,
       providerKind: targetProvider?.kind ?? 'gemini-like',
+      variant: targetProvider?.variant ?? previousStorage.variant,
       providerId: targetProvider?.id ?? previousStorage.providerId,
       authMode: targetProvider?.authMode ?? 'gemini-cli-oauth',
       baseURL: targetProvider?.baseURL ?? previousStorage.baseURL,
@@ -304,6 +355,7 @@ export async function installOAuthTokens(
       customApiEndpoint: {
         ...(current.customApiEndpoint ?? {}),
         kind: normalizedGeminiStorage.providerKind,
+        variant: normalizedGeminiStorage.variant,
         providerId: normalizedGeminiStorage.providerId,
         provider: 'gemini',
         baseURL: normalizedGeminiStorage.baseURL,

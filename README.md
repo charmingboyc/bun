@@ -64,6 +64,8 @@
 
 本项目提供两条关键命令来完成鉴权与模型管理：
 
+> 注意：如果你想使用 `GitHub Copilot OAuth` 或 `Antigravity OAuth`，请切换到 `dev` 分支。`dev` 分支当前极其不稳定，仅用于早期测试，不建议直接用于生产或日常主力环境。
+
 ### 1\. `/login` — 绑定 Provider 与鉴权方式
 
 `/login` 用于在 CLI 内部完成 Provider 鉴权配置，适合 API Key、OAuth 或自定义兼容网关登录流程。

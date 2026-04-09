@@ -13,12 +13,22 @@ import { logEvent } from '../analytics/index.js'
 import { splitSysPromptPrefix } from '../../utils/api.js'
 import { getOpenAIReasoningConfig } from '../../utils/modelReasoning.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
+import {
+  enableAllGitHubCopilotModels,
+  getGitHubCopilotBaseUrl,
+  refreshGitHubCopilotToken,
+} from '../oauth/githubCopilot.js'
+
 import { fetchOpenAICodexModels, refreshOpenAIOAuthToken } from '../oauth/client.js'
 
 export async function refreshOpenAIProviderOAuthIfNeeded(): Promise<ProviderConfig> {
   const storage = readCustomApiStorage()
   const provider = getActiveProviderConfig(storage)
-  if (!provider || provider.kind !== 'openai-like' || provider.authMode !== 'oauth') {
+  if (
+    !provider ||
+    provider.kind !== 'openai-like' ||
+    (provider.variant !== 'openai-oauth' && provider.authMode !== 'oauth')
+  ) {
     throw new Error('Active OpenAI OAuth provider not found')
   }
   const oauth = provider.oauth as { accessToken?: string; refreshToken?: string; expiresAt?: number; accountId?: string } | undefined
@@ -55,7 +65,8 @@ export async function refreshOpenAIProviderOAuthIfNeeded(): Promise<ProviderConf
   const providers = (storage.providers ?? []).map(item =>
     item.kind === provider.kind &&
     item.id === provider.id &&
-    item.authMode === provider.authMode
+    item.authMode === provider.authMode &&
+    item.variant === provider.variant
       ? {
           ...item,
           apiKey: refreshed.accessToken,
@@ -83,7 +94,8 @@ export async function refreshOpenAIProviderOAuthIfNeeded(): Promise<ProviderConf
   const nextProvider = providers.find(item =>
     item.kind === provider.kind &&
     item.id === provider.id &&
-    item.authMode === provider.authMode,
+    item.authMode === provider.authMode &&
+    item.variant === provider.variant,
   )
   if (!nextProvider) {
     throw new Error('Failed to persist refreshed OpenAI OAuth tokens')
@@ -91,7 +103,85 @@ export async function refreshOpenAIProviderOAuthIfNeeded(): Promise<ProviderConf
   return nextProvider
 }
 
-type AnyBlock = Record<string, unknown>
+
+
+export async function refreshCopilotProviderIfNeeded(): Promise<ProviderConfig> {
+  const storage = readCustomApiStorage()
+  const provider = getActiveProviderConfig(storage)
+  if (!provider || provider.variant !== 'github-copilot-oauth') {
+    throw new Error('Active GitHub Copilot provider not found')
+  }
+  const oauth = provider.oauth as {
+    accessToken?: string
+    refreshToken?: string
+    expiresAt?: number
+    enterpriseDomain?: string
+  } | undefined
+  if (!oauth?.accessToken) {
+    return provider
+  }
+  if (!oauth.expiresAt || oauth.expiresAt > Date.now()) {
+    return provider
+  }
+  if (!oauth.refreshToken) {
+    return provider
+  }
+
+  const refreshed = await refreshGitHubCopilotToken(
+    oauth.refreshToken,
+    oauth.enterpriseDomain,
+  )
+  const nextBaseURL = getGitHubCopilotBaseUrl(
+    refreshed.accessToken,
+    oauth.enterpriseDomain,
+  )
+  const freshModels = await enableAllGitHubCopilotModels(
+    refreshed.accessToken,
+    oauth.enterpriseDomain,
+  ).catch(() => provider.models)
+
+  const providers = (storage.providers ?? []).map(item =>
+    item.kind === provider.kind &&
+    item.id === provider.id &&
+    item.authMode === provider.authMode &&
+    item.variant === provider.variant
+      ? {
+          ...item,
+          apiKey: refreshed.accessToken,
+          baseURL: nextBaseURL,
+          models: freshModels ?? item.models,
+          oauth: {
+            ...item.oauth,
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            expiresAt: refreshed.expiresAt,
+            enterpriseDomain: oauth.enterpriseDomain,
+          },
+        }
+      : item,
+  )
+
+  writeCustomApiStorage({
+    ...storage,
+    apiKey: refreshed.accessToken,
+    baseURL: nextBaseURL,
+    savedModels: freshModels ?? storage.savedModels,
+    providers,
+  })
+  process.env.CLOAI_API_KEY = refreshed.accessToken
+  process.env.ANTHROPIC_BASE_URL = nextBaseURL
+
+  const nextProvider = providers.find(item =>
+    item.kind === provider.kind &&
+    item.id === provider.id &&
+    item.authMode === provider.authMode &&
+    item.variant === provider.variant,
+  )
+  if (!nextProvider) {
+    throw new Error('Failed to persist refreshed GitHub Copilot tokens')
+  }
+  return nextProvider
+}
 
 type OpenAICompatConfig = {
   apiKey: string
@@ -755,6 +845,7 @@ function joinBaseUrl(baseURL: string, path: string): string {
   }
 }
 
+
 function resolveCodexUrl(baseURL?: string): string {
   const raw = baseURL?.trim() ? baseURL : 'https://chatgpt.com/backend-api'
   const normalized = raw.replace(/\/+$/, '')
@@ -773,7 +864,8 @@ function getActiveReasoningConfig(model: string) {
     storage.providers?.find(provider =>
       provider.kind === storage.providerKind &&
       provider.id === activeProviderId &&
-      provider.authMode === (storage.activeAuthMode ?? storage.authMode),
+      provider.authMode === (storage.activeAuthMode ?? storage.authMode) &&
+      provider.variant === storage.variant,
     )?.reasoning,
   )
 }
@@ -1366,6 +1458,51 @@ export async function createOpenAIResponsesStream(
     }
     throw new Error(
       `OpenAI Responses request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+    )
+  }
+
+  return response.body.getReader()
+}
+
+
+function joinRawBaseUrl(baseURL: string, path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  const normalizedBaseURL = baseURL.trim().replace(/\/+$/, '')
+  try {
+    return new URL(`${normalizedBaseURL}${normalizedPath}`).toString()
+  } catch {
+    throw new Error(`Invalid OpenAI-compatible base URL: ${normalizedBaseURL}`)
+  }
+}
+
+export async function createCopilotChatStream(
+  config: OpenAICompatConfig,
+  request: OpenAIChatRequest,
+  signal?: AbortSignal,
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  const response = await (config.fetch ?? globalThis.fetch)(
+    joinRawBaseUrl(config.baseURL, '/chat/completions'),
+    {
+      method: 'POST',
+      signal,
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`,
+        ...config.headers,
+      },
+      body: JSON.stringify({ ...request, stream: true }),
+    },
+  )
+
+  if (!response.ok || !response.body) {
+    let responseText = ''
+    try {
+      responseText = await response.text()
+    } catch {
+      responseText = ''
+    }
+    throw new Error(
+      `GitHub Copilot chat request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
     )
   }
 

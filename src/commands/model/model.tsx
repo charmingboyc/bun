@@ -7,6 +7,7 @@ import { COMMON_HELP_ARGS, COMMON_INFO_ARGS } from '../../constants/xml.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
+import type { Message } from '../../types/message.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import { clearFastModeCooldown, isFastModeAvailable, isFastModeEnabled, isFastModeSupportedByModel } from '../../utils/fastMode.js';
 import { MODEL_ALIASES } from '../../utils/model/aliases.js';
@@ -24,7 +25,7 @@ import {
 } from '../../utils/modelReasoning.js';
 import { getDefaultMainLoopModelSetting, isOpus1mMergeEnabled, renderDefaultModelSetting } from '../../utils/model/model.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
-import { validateModel } from '../../utils/model/validateModel.js';
+import { filterUnresolvedToolUses, stripSignatureBlocks } from '../../utils/messages.js';
 
 function extractAccountName(baseURL: string | undefined, providerId: string): string {
   if (providerId === 'anthropic-like') {
@@ -249,13 +250,19 @@ function formatReasoningMessage(model: string | null, reasoning: ReasoningSelect
   return message;
 }
 
+function filterMessagesAfterModelSwitch(prev: Message[]): Message[] {
+  return filterUnresolvedToolUses(stripSignatureBlocks(prev))
+}
+
 function ModelPickerWrapper({
   onDone,
+  setMessages,
 }: {
   onDone: (
     result?: string,
     options?: { display?: CommandResultDisplay },
   ) => void
+  setMessages: (updater: (prev: Message[]) => Message[]) => void
 }): React.ReactNode {
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
@@ -288,6 +295,7 @@ function ModelPickerWrapper({
       mainLoopModel: selectedModel,
       mainLoopModelForSession: null,
     }));
+    setMessages(filterMessagesAfterModelSwitch);
     let message = formatReasoningMessage(selectedModel, reasoning);
 
     let wasFastModeToggledOn = undefined;
@@ -351,12 +359,14 @@ function ModelPickerWrapper({
 
 function SetModelAndClose({
   args,
-  onDone
+  onDone,
+  setMessages,
 }: {
   args: string;
   onDone: (result?: string, options?: {
     display?: CommandResultDisplay;
   }) => void;
+  setMessages: (updater: (prev: Message[]) => Message[]) => void;
 }): React.ReactNode {
   const isFastMode = useAppState(s => s.fastMode);
   const setAppState = useSetAppState();
@@ -418,6 +428,7 @@ function SetModelAndClose({
         mainLoopModel: modelValue,
         mainLoopModelForSession: null
       }));
+      setMessages(filterMessagesAfterModelSwitch);
       let message = `Set model to ${chalk.bold(renderModelLabel(modelValue))}`;
       let wasFastModeToggledOn = undefined;
       if (isFastModeEnabled()) {
@@ -442,7 +453,7 @@ function SetModelAndClose({
       onDone(message);
     }
     void handleModelChange();
-  }, [model, onDone, setAppState]);
+  }, [model, onDone, setAppState, setMessages]);
   return null;
 }
 
@@ -482,7 +493,7 @@ function _temp8(s_0) {
 function _temp7(s) {
   return s.mainLoopModel;
 }
-export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
+export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   args = args?.trim() || '';
   if (COMMON_INFO_ARGS.includes(args)) {
     logEvent('tengu_model_command_inline_help', {
@@ -500,9 +511,9 @@ export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
     logEvent('tengu_model_command_inline', {
       args: args as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
     });
-    return <SetModelAndClose args={args} onDone={onDone} />;
+    return <SetModelAndClose args={args} onDone={onDone} setMessages={context.setMessages} />;
   }
-  return <ModelPickerWrapper onDone={onDone} />;
+  return <ModelPickerWrapper onDone={onDone} setMessages={context.setMessages} />;
 };
 function renderModelLabel(model: string | null): string {
   const persistedCustomModel = readCustomApiStorage().model?.trim();

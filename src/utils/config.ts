@@ -183,7 +183,9 @@ export type OutputStyle = string
 export type GlobalConfig = {
   customApiEndpoint?: {
     kind?: import('./customApiStorage.js').CompatibleProviderKind
+    variant?: import('./customApiStorage.js').ProviderVariant
     providerId?: string
+    authMode?: import('./customApiStorage.js').ProviderAuthMode
     provider?: 'anthropic' | 'openai' | 'gemini'
     baseURL?: string
     apiKey?: string

@@ -33,11 +33,13 @@ import {
   convertAnthropicRequestToOpenAICodex,
   convertAnthropicRequestToOpenAIResponses,
   createAnthropicStreamFromOpenAI,
-  createAnthropicStreamFromOpenAICodex,
   createAnthropicStreamFromOpenAIResponses,
+  createAnthropicStreamFromOpenAICodex,
+  createCopilotChatStream,
   createOpenAICompatStream,
   createOpenAICodexStream,
   createOpenAIResponsesStream,
+  refreshCopilotProviderIfNeeded,
   refreshOpenAIProviderOAuthIfNeeded,
 } from './openaiCompat.js'
 import {
@@ -51,6 +53,7 @@ import {
   getAttributionHeader,
   getCLISyspromptPrefix,
 } from '../../constants/system.js'
+import { GITHUB_COPILOT_HEADERS } from '../oauth/githubCopilot.js'
 import {
   getEmptyToolPermissionContext,
   type QueryChainTracking,
@@ -131,7 +134,7 @@ const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
   : null
 
 import { feature } from 'bun:bundle'
-import type { ClientOptions } from '@anthropic-ai/sdk'
+import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk'
 import {
   APIConnectionTimeoutError,
   APIError,
@@ -160,6 +163,7 @@ import {
   CONTEXT_MANAGEMENT_BETA_HEADER,
   EFFORT_BETA_HEADER,
   FAST_MODE_BETA_HEADER,
+  INTERLEAVED_THINKING_BETA_HEADER,
   PROMPT_CACHING_SCOPE_BETA_HEADER,
   REDACT_THINKING_BETA_HEADER,
   STRUCTURED_OUTPUTS_BETA_HEADER,
@@ -284,6 +288,46 @@ import {
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
 type JsonObject = { [key: string]: JsonValue }
 type JsonArray = JsonValue[]
+
+function hasCopilotVisionInput(messages: Message[]): boolean {
+  return messages.some(message =>
+    message.type === 'user' &&
+    Array.isArray(message.message.content) &&
+    message.message.content.some(block => block.type === 'image'),
+  )
+}
+
+function buildCopilotRuntimeHeaders(messages: Message[]): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...GITHUB_COPILOT_HEADERS,
+    'X-Initiator': messages.at(-1)?.type === 'user' ? 'user' : 'agent',
+    'Openai-Intent': 'conversation-edits',
+  }
+  if (hasCopilotVisionInput(messages)) {
+    headers['Copilot-Vision-Request'] = 'true'
+  }
+  return headers
+}
+
+function buildCopilotAnthropicHeaders(
+  messages: Message[],
+  model: string,
+  includeInterleavedBeta: boolean,
+): Record<string, string> {
+  const headers = buildCopilotRuntimeHeaders(messages)
+  const betaHeaders: string[] = []
+  if (includeInterleavedBeta && !modelSupportsAdaptiveThinking(model)) {
+    betaHeaders.push(INTERLEAVED_THINKING_BETA_HEADER)
+  }
+  return {
+    accept: 'application/json',
+    'anthropic-dangerous-direct-browser-access': 'true',
+    ...headers,
+    ...(betaHeaders.length > 0
+      ? { 'anthropic-beta': betaHeaders.join(',') }
+      : {}),
+  }
+}
 
 /**
  * Assemble the extra body parameters for the API request, based on the
@@ -1904,20 +1948,144 @@ async function* queryModel(
             : activeProviderConfig?.kind === 'gemini-like'
               ? 'gemini'
               : activeProviderConfig?.kind === 'anthropic-like'
-              ? 'anthropic'
-              : customApiStorage.provider ?? 'anthropic'
+                ? 'anthropic'
+                : customApiStorage.provider ?? 'anthropic'
         if (compatProvider === 'openai') {
           const activeOpenAIProvider =
             activeProviderConfig?.kind === 'openai-like'
               ? activeProviderConfig
               : undefined
           const openAIAuthMode =
-            activeOpenAIProvider?.authMode ??
-            (activeProviderId === 'openai' ? 'oauth' : 'chat-completions')
+            activeOpenAIProvider?.variant === 'openai-oauth'
+              ? 'oauth'
+              : activeOpenAIProvider?.variant === 'openai-official-responses'
+                ? 'responses'
+                : activeOpenAIProvider?.authMode ??
+                  (activeProviderId === 'openai' ? 'oauth' : 'chat-completions')
 
           if (openAIAuthMode === 'oauth') {
+            const isCopilotOAuth = activeOpenAIProvider?.variant === 'github-copilot-oauth'
+            if (isCopilotOAuth) {
+              const providerWithFreshTokens = await refreshCopilotProviderIfNeeded()
+              const copilotProtocol = params.model.startsWith('claude-')
+                ? 'anthropic'
+                : /^gpt-5(?:[.-]|$)/.test(params.model)
+                  ? 'responses'
+                  : 'chat'
+              const copilotHeaders = buildCopilotRuntimeHeaders(messages)
+              const copilotRequestHeaders = clientRequestId
+                ? {
+                    ...copilotHeaders,
+                    [CLIENT_REQUEST_ID_HEADER]: clientRequestId,
+                  }
+                : copilotHeaders
+
+              if (copilotProtocol === 'anthropic') {
+                const copilotClient = await getAnthropicClient({
+                  apiKey: null,
+                  authTokenOverride: providerWithFreshTokens.apiKey || '',
+                  baseURLOverride:
+                    providerWithFreshTokens.baseURL ?? customApiStorage.baseURL,
+                  defaultHeadersOverride: buildCopilotAnthropicHeaders(
+                    messages,
+                    params.model,
+                    params.thinking !== undefined,
+                  ),
+                  fetchOverride: globalThis.fetch,
+                  maxRetries: 0,
+                  model: options.model,
+                  source: options.querySource,
+                  forceCompatProvider: 'anthropic',
+                })
+                const copilotAnthropicParams = {
+                  model: params.model,
+                  messages: params.messages,
+                  system: params.system,
+                  tools: params.tools,
+                  tool_choice: params.tool_choice,
+                  metadata: params.metadata,
+                  max_tokens: params.max_tokens,
+                  ...(params.thinking ? { thinking: params.thinking } : {}),
+                  ...(params.output_config
+                    ? { output_config: params.output_config }
+                    : {}),
+                  ...(params.temperature !== undefined
+                    ? { temperature: params.temperature }
+                    : {}),
+                  stream: true,
+                }
+                const result = await copilotClient.beta.messages
+                  .create(
+                    copilotAnthropicParams,
+                    {
+                      signal,
+                      ...(clientRequestId && {
+                        headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
+                      }),
+                    },
+                  )
+                  .withResponse()
+                queryCheckpoint('query_response_headers_received')
+                streamRequestId = result.request_id
+                streamResponse = result.response
+                return result.data
+              }
+
+              if (copilotProtocol === 'responses') {
+                const reader = await createOpenAIResponsesStream(
+                  {
+                    apiKey: providerWithFreshTokens.apiKey || '',
+                    baseURL: providerWithFreshTokens.baseURL ?? customApiStorage.baseURL ?? '',
+                    headers: copilotRequestHeaders,
+                    fetch: globalThis.fetch,
+                  },
+                  convertAnthropicRequestToOpenAIResponses({
+                    model: params.model,
+                    system: params.system,
+                    messages: messagesForAPI.map(msg => msg.message as MessageParam),
+                    tools: params.tools,
+                    tool_choice: params.tool_choice,
+                    temperature: params.temperature,
+                    max_tokens: params.max_tokens,
+                  }),
+                  signal,
+                )
+                queryCheckpoint('query_response_headers_received')
+                return createAnthropicStreamFromOpenAIResponses({
+                  reader,
+                  model: params.model,
+                }) as unknown as Stream<BetaRawMessageStreamEvent>
+              }
+
+              const reader = await createCopilotChatStream(
+                {
+                  apiKey: providerWithFreshTokens.apiKey || '',
+                  baseURL: providerWithFreshTokens.baseURL ?? customApiStorage.baseURL ?? '',
+                  headers: copilotRequestHeaders,
+                  fetch: globalThis.fetch,
+                },
+                convertAnthropicRequestToOpenAI({
+                  model: params.model,
+                  system: params.system,
+                  messages: params.messages,
+                  tools: params.tools,
+                  tool_choice: params.tool_choice,
+                  temperature: params.temperature,
+                  max_tokens: params.max_tokens,
+                }),
+                signal,
+              )
+              queryCheckpoint('query_response_headers_received')
+              return createAnthropicStreamFromOpenAI({
+                reader,
+                model: params.model,
+              }) as unknown as Stream<BetaRawMessageStreamEvent>
+            }
+
+
             // Refresh OpenAI OAuth token if expired (like Gemini OAuth pattern)
-            await refreshOpenAIProviderOAuthIfNeeded()
+            const providerWithFreshTokens = await refreshOpenAIProviderOAuthIfNeeded()
+            const effectiveOpenAIProvider = providerWithFreshTokens ?? activeOpenAIProvider
             const openAICodexRequest = convertAnthropicRequestToOpenAICodex({
               model: params.model,
               system: params.system,
@@ -1927,8 +2095,8 @@ async function* queryModel(
             })
             const reader = await createOpenAICodexStream(
               {
-                apiKey: process.env.CLOAI_API_KEY || '',
-                baseURL: customApiStorage.baseURL,
+                apiKey: (effectiveOpenAIProvider?.apiKey ?? process.env.CLOAI_API_KEY) || '',
+                baseURL: effectiveOpenAIProvider?.baseURL ?? customApiStorage.baseURL,
                 headers: clientRequestId
                   ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
                   : undefined,
@@ -1957,7 +2125,7 @@ async function* queryModel(
             const reader = await createOpenAIResponsesStream(
               {
                 apiKey: process.env.CLOAI_API_KEY || '',
-                baseURL: customApiStorage.baseURL,
+                baseURL: activeOpenAIProvider?.baseURL ?? customApiStorage.baseURL,
                 headers: clientRequestId
                   ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
                   : undefined,

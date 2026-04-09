@@ -12,6 +12,7 @@ import {
   writeCustomApiStorage,
   type ProviderConfig,
 } from '../../utils/customApiStorage.js'
+import { refreshAntigravityTokens } from '../oauth/antigravity.js'
 import { refreshGeminiCliTokens } from '../oauth/geminiCli.js'
 
 const GEMINI_CLI_HEADERS = {
@@ -28,7 +29,60 @@ const GEMINI_CLI_ENDPOINT_FALLBACKS = [
   'https://cloudcode-pa.googleapis.com',
 ] as const
 
-const MAX_RETRIES = 3
+const ANTIGRAVITY_DAILY_ENDPOINT = 'https://daily-cloudcode-pa.sandbox.googleapis.com'
+const ANTIGRAVITY_ENDPOINT_FALLBACKS = [
+  ANTIGRAVITY_DAILY_ENDPOINT,
+  'https://cloudcode-pa.googleapis.com',
+] as const
+const DEFAULT_ANTIGRAVITY_VERSION = '1.18.4'
+const CLAUDE_THINKING_BETA_HEADER = 'interleaved-thinking-2025-05-14'
+const ANTIGRAVITY_SYSTEM_INSTRUCTION =
+  'You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.' +
+  'You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.' +
+  '**Absolute paths only**' +
+  '**Proactiveness**'
+
+function getAntigravityHeaders(): Record<string, string> {
+  return {
+    'User-Agent': `antigravity/${process.env.PI_AI_ANTIGRAVITY_VERSION || DEFAULT_ANTIGRAVITY_VERSION} darwin/arm64`,
+  }
+}
+
+function needsAntigravityClaudeThinkingHeader(model: string): boolean {
+  return model.startsWith('claude-')
+}
+
+function applyAntigravityRequestShape(
+  request: GeminiGenerateContentRequest,
+  model: string,
+): GeminiGenerateContentRequest {
+  const nextSystemParts = request.systemInstruction?.parts ?? []
+  return {
+    ...request,
+    systemInstruction: {
+      role: 'user',
+      parts: [
+        { text: ANTIGRAVITY_SYSTEM_INSTRUCTION },
+        {
+          text: `Please ignore following [ignore]${ANTIGRAVITY_SYSTEM_INSTRUCTION}[/ignore]`,
+        },
+        ...nextSystemParts,
+      ],
+    },
+    generationConfig: {
+      ...(request.generationConfig ?? {}),
+      ...(model.startsWith('claude-')
+        ? {
+            thinkingConfig: {
+              includeThoughts: true,
+              ...((request.generationConfig as Record<string, unknown> | undefined)?.thinkingConfig as Record<string, unknown> | undefined),
+            },
+          }
+        : {}),
+    },
+  }
+}
+const MAX_RETRIES = 2
 const BASE_DELAY_MS = 1000
 const MAX_EMPTY_STREAM_RETRIES = 2
 const EMPTY_STREAM_BASE_DELAY_MS = 500
@@ -90,9 +144,11 @@ type GeminiCliRequest = {
   project: string
   model: string
   request: GeminiGenerateContentRequest
+  requestType?: 'agent'
   userAgent: string
   requestId: string
 }
+
 
 type GeminiUsageMetadata = {
   promptTokenCount?: number
@@ -423,6 +479,10 @@ export async function createGeminiVertexStream(input: {
   return response.body.getReader()
 }
 
+function isAntigravityProvider(provider: ProviderConfig): boolean {
+  return provider.variant === 'gemini-antigravity-oauth'
+}
+
 function getActiveGeminiProvider(): ProviderConfig | undefined {
   const storage = readCustomApiStorage()
   const provider = getActiveProviderConfig(storage)
@@ -432,7 +492,12 @@ function getActiveGeminiProvider(): ProviderConfig | undefined {
 export async function refreshGeminiProviderOAuthIfNeeded(): Promise<ProviderConfig> {
   const storage = readCustomApiStorage()
   const provider = getActiveGeminiProvider()
-  if (!provider || provider.authMode !== 'gemini-cli-oauth') {
+  if (
+    !provider ||
+    (provider.variant !== 'gemini-cli-oauth' &&
+      provider.variant !== 'gemini-antigravity-oauth' &&
+      provider.authMode !== 'gemini-cli-oauth')
+  ) {
     throw new Error('Active Gemini OAuth provider not found')
   }
   const oauth = provider.oauth
@@ -446,15 +511,21 @@ export async function refreshGeminiProviderOAuthIfNeeded(): Promise<ProviderConf
     throw new Error('Gemini OAuth provider is missing refresh token')
   }
 
-  const refreshed = await refreshGeminiCliTokens({
-    refreshToken: oauth.refreshToken,
-    projectId: oauth.projectId,
-  })
+  const refreshed = isAntigravityProvider(provider)
+    ? await refreshAntigravityTokens({
+        refreshToken: oauth.refreshToken,
+        projectId: oauth.projectId,
+      })
+    : await refreshGeminiCliTokens({
+        refreshToken: oauth.refreshToken,
+        projectId: oauth.projectId,
+      })
 
   const providers = (storage.providers ?? []).map(item =>
     item.kind === provider.kind &&
     item.id === provider.id &&
-    item.authMode === provider.authMode
+    item.authMode === provider.authMode &&
+    item.variant === provider.variant
       ? {
           ...item,
           oauth: {
@@ -475,6 +546,9 @@ export async function refreshGeminiProviderOAuthIfNeeded(): Promise<ProviderConf
               typeof refreshed.projectId === 'string'
                 ? refreshed.projectId
                 : item.oauth?.projectId,
+            ...(typeof refreshed.email === 'string'
+              ? { email: refreshed.email }
+              : {}),
           },
         }
       : item,
@@ -488,7 +562,8 @@ export async function refreshGeminiProviderOAuthIfNeeded(): Promise<ProviderConf
   const nextProvider = providers.find(item =>
     item.kind === provider.kind &&
     item.id === provider.id &&
-    item.authMode === provider.authMode,
+    item.authMode === provider.authMode &&
+    item.variant === provider.variant,
   )
   if (!nextProvider) {
     throw new Error('Failed to persist refreshed Gemini OAuth tokens')
@@ -509,17 +584,26 @@ export async function createGeminiCliStream(input: {
     throw new Error('Gemini CLI OAuth provider is missing access token or project ID')
   }
 
+  const isAntigravity = isAntigravityProvider(input.provider)
   const requestBody: GeminiCliRequest = {
     project: oauth.projectId,
     model: input.model,
-    request: input.request,
-    userAgent: 'pi-coding-agent',
-    requestId: `pi-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    request: isAntigravity
+      ? applyAntigravityRequestShape(input.request, input.model)
+      : input.request,
+    ...(isAntigravity ? { requestType: 'agent' as const } : {}),
+    userAgent: isAntigravity ? 'antigravity' : 'pi-coding-agent',
+    requestId: `${isAntigravity ? 'agent' : 'pi'}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
   }
   const body = JSON.stringify(requestBody)
   const endpoints = input.provider.baseURL?.trim()
     ? [input.provider.baseURL.trim()]
-    : [...GEMINI_CLI_ENDPOINT_FALLBACKS]
+    : isAntigravity
+      ? [...ANTIGRAVITY_ENDPOINT_FALLBACKS]
+      : [...GEMINI_CLI_ENDPOINT_FALLBACKS]
+  const providerHeaders = isAntigravity
+    ? getAntigravityHeaders()
+    : GEMINI_CLI_HEADERS
 
   let response: Response | undefined
   let endpointIndex = 0
@@ -540,7 +624,10 @@ export async function createGeminiCliStream(input: {
             Authorization: `Bearer ${oauth.accessToken}`,
             'Content-Type': 'application/json',
             Accept: 'text/event-stream',
-            ...GEMINI_CLI_HEADERS,
+            ...providerHeaders,
+            ...(isAntigravity && needsAntigravityClaudeThinkingHeader(input.model)
+              ? { 'anthropic-beta': CLAUDE_THINKING_BETA_HEADER }
+              : {}),
             ...input.headers,
           },
           body,

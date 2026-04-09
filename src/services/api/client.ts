@@ -95,21 +95,36 @@ export async function getAnthropicClient({
   model,
   fetchOverride,
   source,
+  authTokenOverride,
+  baseURLOverride,
+  defaultHeadersOverride,
+  forceCompatProvider,
 }: {
-  apiKey?: string
+  apiKey?: string | null
   maxRetries: number
   model?: string
   fetchOverride?: ClientOptions['fetch']
   source?: string
+  authTokenOverride?: string
+  baseURLOverride?: string
+  defaultHeadersOverride?: Record<string, string>
+  forceCompatProvider?: 'anthropic' | 'openai' | 'gemini'
 }): Promise<Anthropic> {
   const customApiStorage = readCustomApiStorage()
   const activeProviderConfig = getActiveProviderConfig(customApiStorage)
   const customApiProvider =
-    customApiStorage.providerKind === 'openai-like'
+    forceCompatProvider ??
+    (activeProviderConfig?.kind === 'openai-like'
       ? 'openai'
-      : customApiStorage.providerKind === 'anthropic-like'
+      : activeProviderConfig?.kind === 'anthropic-like'
         ? 'anthropic'
-        : customApiStorage.provider ?? getGlobalCompatProvider()
+        : activeProviderConfig?.kind === 'gemini-like'
+          ? 'gemini'
+          : customApiStorage.providerKind === 'openai-like'
+            ? 'openai'
+            : customApiStorage.providerKind === 'anthropic-like'
+              ? 'anthropic'
+              : customApiStorage.provider ?? getGlobalCompatProvider())
   const containerId = process.env.CLAUDE_CODE_CONTAINER_ID
   const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
   const clientApp = process.env.CLAUDE_AGENT_SDK_CLIENT_APP
@@ -140,11 +155,15 @@ export async function getAnthropicClient({
     defaultHeaders['x-anthropic-additional-protection'] = 'true'
   }
 
+  if (defaultHeadersOverride) {
+    Object.assign(defaultHeaders, defaultHeadersOverride)
+  }
+
   logForDebugging('[API:auth] OAuth token check starting')
   await checkAndRefreshOAuthTokenIfNeeded()
   logForDebugging('[API:auth] OAuth token check complete')
 
-  if (!isClaudeAISubscriber()) {
+  if (!isClaudeAISubscriber() && authTokenOverride === undefined) {
     await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
@@ -310,17 +329,24 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
+  const resolvedBaseURL = baseURLOverride ?? activeProviderConfig?.baseURL
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
-    apiKey: isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey(),
-    authToken: isClaudeAISubscriber()
-      ? getClaudeAIOAuthTokens()?.accessToken
-      : undefined,
+    apiKey: isClaudeAISubscriber()
+      ? null
+      : apiKey !== undefined
+        ? apiKey
+        : getAnthropicApiKey(),
+    authToken:
+      authTokenOverride ??
+      (isClaudeAISubscriber()
+        ? getClaudeAIOAuthTokens()?.accessToken
+        : undefined),
     // Set baseURL from OAuth config when using staging OAuth
     ...(process.env.USER_TYPE === 'ant' &&
     isEnvTruthy(process.env.USE_STAGING_OAUTH)
       ? { baseURL: getOauthConfig().BASE_API_URL }
       : {}),
-    ...(activeProviderConfig?.baseURL ? { baseURL: activeProviderConfig.baseURL } : {}),
+    ...(resolvedBaseURL ? { baseURL: resolvedBaseURL } : {}),
     ...ARGS,
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }

@@ -159,7 +159,18 @@ export function getReasoningMode(
   providerKind: CompatibleProviderKind | undefined,
   authMode: ProviderAuthMode | undefined,
   model: string,
+  variant?: import('./customApiStorage.js').ProviderVariant,
 ): ReasoningMode {
+  if (variant === 'github-copilot-oauth') {
+    return model.startsWith('claude-') && modelSupportsEffort(model)
+      ? 'anthropic-effort'
+      : 'none'
+  }
+  if (variant === 'gemini-antigravity-oauth') {
+    return model.startsWith('claude-') && modelSupportsEffort(model)
+      ? 'anthropic-effort'
+      : 'none'
+  }
   if (providerKind === 'openai-like') {
     if (authMode === 'chat-completions') return 'openai-chat-completions'
     if (authMode === 'responses') return 'openai-responses'
@@ -175,11 +186,12 @@ export function getReasoningMode(
 export function getReasoningSpec(input: {
   providerKind?: CompatibleProviderKind
   authMode?: ProviderAuthMode
+  variant?: import('./customApiStorage.js').ProviderVariant
   model: string
   storedReasoning?: ProviderReasoningConfig
 }): ReasoningSpec {
-  const { providerKind, authMode, model, storedReasoning } = input
-  const mode = getReasoningMode(providerKind, authMode, model)
+  const { providerKind, authMode, variant, model, storedReasoning } = input
+  const mode = getReasoningMode(providerKind, authMode, model, variant)
 
   if (mode === 'anthropic-effort') {
     const defaultEffort = getAnthropicDefaultEffort(model)

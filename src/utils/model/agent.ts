@@ -130,25 +130,42 @@ export function getAgentModelDisplay(model: string | undefined): string {
   return capitalize(model)
 }
 
+function getCustomApiProviderLabel(storage: ReturnType<typeof readCustomApiStorage>): 'openai' | 'anthropic' | 'gemini' {
+  if (storage.variant === 'github-copilot-oauth') {
+    return 'openai'
+  }
+  if (
+    storage.variant === 'gemini-cli-oauth' ||
+    storage.variant === 'gemini-antigravity-oauth' ||
+    storage.variant === 'gemini-ai-studio'
+  ) {
+    return 'gemini'
+  }
+  if (storage.variant === 'claude-official') {
+    return 'anthropic'
+  }
+  return storage.providerKind === 'openai-like'
+    ? 'openai'
+    : storage.providerKind === 'anthropic-like'
+      ? 'anthropic'
+      : storage.provider ??
+        getGlobalConfig().customApiEndpoint?.provider ??
+        'anthropic'
+}
+
 /**
  * Get available model options for agents
  */
 export function getAgentModelOptions(): AgentModelOption[] {
+  const secureStorage = readCustomApiStorage()
   const customModels = [
     ...(getGlobalConfig().customApiEndpoint?.savedModels ?? []),
-    ...(readCustomApiStorage().savedModels ?? []),
+    ...(secureStorage.savedModels ?? []),
   ]
     .map(model => model.trim())
     .filter(Boolean)
 
-  const customApiProvider =
-    readCustomApiStorage().providerKind === 'openai-like'
-      ? 'openai'
-      : readCustomApiStorage().providerKind === 'anthropic-like'
-        ? 'anthropic'
-        : readCustomApiStorage().provider ??
-          getGlobalConfig().customApiEndpoint?.provider ??
-          'anthropic'
+  const customApiProvider = getCustomApiProviderLabel(secureStorage)
 
   if (customApiProvider === 'openai' || customModels.length > 0) {
     return [

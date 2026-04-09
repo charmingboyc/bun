@@ -27,7 +27,7 @@ type EffortCommandResult = {
 
 function getOpenAINativeReasoningMessage(): string | null {
   const storage = readCustomApiStorage();
-  const mode = getReasoningMode(storage.providerKind, storage.activeAuthMode ?? storage.authMode, storage.activeModel ?? storage.model ?? '');
+  const mode = getReasoningMode(storage.providerKind, storage.activeAuthMode ?? storage.authMode, storage.activeModel ?? storage.model ?? '', storage.variant);
   if (
     mode === 'openai-chat-completions' ||
     mode === 'openai-responses' ||
