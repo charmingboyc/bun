@@ -44,9 +44,11 @@ import {
 } from './openaiCompat.js'
 import {
   convertAnthropicRequestToGemini,
-  createAnthropicStreamFromGemini,
+  createAnthropicStreamFromGeminiWithEmptyRetry,
   createGeminiCliStreamWithEmptyRetry,
   createGeminiVertexStream,
+  fetchGeminiCliResponse,
+  fetchGeminiVertexResponse,
   refreshGeminiProviderOAuthIfNeeded,
 } from './geminiLike.js'
 import {
@@ -329,6 +331,20 @@ function buildCopilotAnthropicHeaders(
   }
 }
 
+function shouldFallbackCopilotAnthropicRequest(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status !== 400) {
+    return false
+  }
+
+  const message = error.message.toLowerCase()
+  return (
+    message.includes('invalid request') ||
+    message.includes('tool_use') ||
+    message.includes('tool_result') ||
+    message.includes('tool use concurrency')
+  )
+}
+
 /**
  * Assemble the extra body parameters for the API request, based on the
  * CLAUDE_CODE_EXTRA_BODY environment variable if present and on any beta
@@ -337,6 +353,7 @@ function buildCopilotAnthropicHeaders(
  * @param betaHeaders - An array of beta headers to include in the request.
  * @returns A JSON object representing the extra body parameters.
  */
+
 export function getExtraBodyParams(betaHeaders?: string[]): JsonObject {
   // Parse user's extra body parameters first
   const extraBodyStr = process.env.CLAUDE_CODE_EXTRA_BODY
@@ -1981,54 +1998,64 @@ async function* queryModel(
                 : copilotHeaders
 
               if (copilotProtocol === 'anthropic') {
-                const copilotClient = await getAnthropicClient({
-                  apiKey: null,
-                  authTokenOverride: providerWithFreshTokens.apiKey || '',
-                  baseURLOverride:
-                    providerWithFreshTokens.baseURL ?? customApiStorage.baseURL,
-                  defaultHeadersOverride: buildCopilotAnthropicHeaders(
-                    messages,
-                    params.model,
-                    params.thinking !== undefined,
-                  ),
-                  fetchOverride: globalThis.fetch,
-                  maxRetries: 0,
-                  model: options.model,
-                  source: options.querySource,
-                  forceCompatProvider: 'anthropic',
-                })
-                const copilotAnthropicParams = {
-                  model: params.model,
-                  messages: params.messages,
-                  system: params.system,
-                  tools: params.tools,
-                  tool_choice: params.tool_choice,
-                  metadata: params.metadata,
-                  max_tokens: params.max_tokens,
-                  ...(params.thinking ? { thinking: params.thinking } : {}),
-                  ...(params.output_config
-                    ? { output_config: params.output_config }
-                    : {}),
-                  ...(params.temperature !== undefined
-                    ? { temperature: params.temperature }
-                    : {}),
-                  stream: true,
-                }
-                const result = await copilotClient.beta.messages
-                  .create(
-                    copilotAnthropicParams,
-                    {
-                      signal,
-                      ...(clientRequestId && {
-                        headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
-                      }),
-                    },
+                try {
+                  const copilotClient = await getAnthropicClient({
+                    apiKey: null,
+                    authTokenOverride: providerWithFreshTokens.apiKey || '',
+                    baseURLOverride:
+                      providerWithFreshTokens.baseURL ?? customApiStorage.baseURL,
+                    defaultHeadersOverride: buildCopilotAnthropicHeaders(
+                      messages,
+                      params.model,
+                      params.thinking !== undefined,
+                    ),
+                    fetchOverride: globalThis.fetch,
+                    maxRetries: 0,
+                    model: options.model,
+                    source: options.querySource,
+                    forceCompatProvider: 'anthropic',
+                  })
+                  const copilotAnthropicParams = {
+                    model: params.model,
+                    messages: params.messages,
+                    system: params.system,
+                    tools: params.tools,
+                    tool_choice: params.tool_choice,
+                    metadata: params.metadata,
+                    max_tokens: params.max_tokens,
+                    ...(params.thinking ? { thinking: params.thinking } : {}),
+                    ...(params.output_config
+                      ? { output_config: params.output_config }
+                      : {}),
+                    ...(params.temperature !== undefined
+                      ? { temperature: params.temperature }
+                      : {}),
+                    stream: true,
+                  }
+                  const result = await copilotClient.beta.messages
+                    .create(
+                      copilotAnthropicParams,
+                      {
+                        signal,
+                        ...(clientRequestId && {
+                          headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
+                        }),
+                      },
+                    )
+                    .withResponse()
+                  queryCheckpoint('query_response_headers_received')
+                  streamRequestId = result.request_id
+                  streamResponse = result.response
+                  return result.data
+                } catch (error) {
+                  if (!shouldFallbackCopilotAnthropicRequest(error)) {
+                    throw error
+                  }
+                  logForDebugging(
+                    '[Copilot] Anthropic Claude route rejected payload, retrying via chat-completions',
+                    { level: 'warn' },
                   )
-                  .withResponse()
-                queryCheckpoint('query_response_headers_received')
-                streamRequestId = result.request_id
-                streamResponse = result.response
-                return result.data
+                }
               }
 
               if (copilotProtocol === 'responses') {
@@ -2208,9 +2235,32 @@ async function* queryModel(
               },
             )
             queryCheckpoint('query_response_headers_received')
-            return createAnthropicStreamFromGemini({
+            return createAnthropicStreamFromGeminiWithEmptyRetry({
               reader,
+              recreateReader: () =>
+                createGeminiCliStreamWithEmptyRetry({
+                  provider: providerWithFreshTokens,
+                  model: params.model,
+                  request: geminiRequest,
+                  headers: clientRequestId
+                    ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
+                    : undefined,
+                  fetch: globalThis.fetch,
+                  signal,
+                }),
+              fallbackPayload: () =>
+                fetchGeminiCliResponse({
+                  provider: providerWithFreshTokens,
+                  model: params.model,
+                  request: geminiRequest,
+                  headers: clientRequestId
+                    ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
+                    : undefined,
+                  fetch: globalThis.fetch,
+                  signal,
+                }),
               model: params.model,
+              signal,
             }) as unknown as Stream<BetaRawMessageStreamEvent>
           }
 
@@ -2233,9 +2283,34 @@ async function* queryModel(
             },
           )
           queryCheckpoint('query_response_headers_received')
-          return createAnthropicStreamFromGemini({
+          return createAnthropicStreamFromGeminiWithEmptyRetry({
             reader,
+            recreateReader: () =>
+              createGeminiVertexStream({
+                apiKey: geminiApiKey,
+                baseURL: geminiBaseURL,
+                model: params.model,
+                request: geminiRequest,
+                headers: clientRequestId
+                  ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
+                  : undefined,
+                fetch: globalThis.fetch,
+                signal,
+              }),
+            fallbackPayload: () =>
+              fetchGeminiVertexResponse({
+                apiKey: geminiApiKey,
+                baseURL: geminiBaseURL,
+                model: params.model,
+                request: geminiRequest,
+                headers: clientRequestId
+                  ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
+                  : undefined,
+                fetch: globalThis.fetch,
+                signal,
+              }),
             model: params.model,
+            signal,
           }) as unknown as Stream<BetaRawMessageStreamEvent>
         }
 

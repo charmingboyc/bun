@@ -1986,15 +1986,9 @@ function relocateToolReferenceSiblings(
   return result
 }
 
-type NormalizeMessagesForAPIOptions = {
-  preserveUserMessageBoundaries?: boolean
-  preserveAssistantMessageBoundaries?: boolean
-}
-
 export function normalizeMessagesForAPI(
   messages: Message[],
   tools: Tools = [],
-  options: NormalizeMessagesForAPIOptions = {},
 ): (UserMessage | AssistantMessage)[] {
   // Build set of available tool names for filtering unavailable tool references
   const availableToolNames = new Set(tools.map(t => t.name))
@@ -2090,7 +2084,7 @@ export function normalizeMessagesForAPI(
             timestamp: message.timestamp,
           })
           const lastMessage = last(result)
-          if (!options.preserveUserMessageBoundaries && lastMessage?.type === 'user') {
+          if (lastMessage?.type === 'user') {
             result[result.length - 1] = mergeUserMessages(lastMessage, userMsg)
             return
           }
@@ -2098,9 +2092,6 @@ export function normalizeMessagesForAPI(
           return
         }
         case 'user': {
-          // Merge consecutive user messages because Bedrock doesn't support
-          // multiple user messages in a row; 1P API does and merges them
-          // into a single user turn
 
           // When tool search is NOT enabled, strip all tool_reference blocks from
           // tool_result content, as these are only valid with the tool search beta.
@@ -2192,7 +2183,7 @@ export function normalizeMessagesForAPI(
 
           // If the last message is also a user message, merge them
           const lastMessage = last(result)
-          if (!options.preserveUserMessageBoundaries && lastMessage?.type === 'user') {
+          if (lastMessage?.type === 'user') {
             result[result.length - 1] = mergeUserMessages(
               lastMessage,
               normalizedMessage,
@@ -2253,21 +2244,19 @@ export function normalizeMessagesForAPI(
           // Walk backwards, skipping tool results and different-ID assistants,
           // since concurrent agents (teammates) can interleave streaming content
           // blocks from multiple API responses with different message IDs.
-          if (!options.preserveAssistantMessageBoundaries) {
-            for (let i = result.length - 1; i >= 0; i--) {
-              const msg = result[i]!
+          for (let i = result.length - 1; i >= 0; i--) {
+            const msg = result[i]!
 
-              if (msg.type !== 'assistant' && !isToolResultMessage(msg)) {
-                break
-              }
+            if (msg.type !== 'assistant' && !isToolResultMessage(msg)) {
+              break
+            }
 
-              if (msg.type === 'assistant') {
-                if (msg.message.id === normalizedMessage.message.id) {
-                  result[i] = mergeAssistantMessages(msg, normalizedMessage)
-                  return
-                }
-                continue
+            if (msg.type === 'assistant') {
+              if (msg.message.id === normalizedMessage.message.id) {
+                result[i] = mergeAssistantMessages(msg, normalizedMessage)
+                return
               }
+              continue
             }
           }
 
@@ -2286,7 +2275,7 @@ export function normalizeMessagesForAPI(
 
           // If the last message is also a user message, merge them
           const lastMessage = last(result)
-          if (!options.preserveUserMessageBoundaries && lastMessage?.type === 'user') {
+          if (lastMessage?.type === 'user') {
             result[result.length - 1] = attachmentMessage.reduce(
               (p, c) => mergeUserMessagesAndToolResults(p, c),
               lastMessage,

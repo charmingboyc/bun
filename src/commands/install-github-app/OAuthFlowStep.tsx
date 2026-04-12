@@ -32,7 +32,35 @@ type OAuthStatus = {
   state: 'about_to_retry';
   nextState: OAuthStatus;
 };
-const PASTE_HERE_MSG = 'Paste code here if prompted > ';
+function parseManualOAuthInput(value: string): {
+  authorizationCode: string;
+  state: string;
+} | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const authorizationCode = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    if (authorizationCode && state) {
+      return { authorizationCode, state };
+    }
+  } catch {
+    // Fall through to raw code parsing.
+  }
+
+  const [authorizationCode, state] = trimmed.split('#');
+  if (!authorizationCode || !state) {
+    return null;
+  }
+
+  return { authorizationCode, state };
+}
+
+const PASTE_HERE_MSG = 'Paste full link from browser here > ';
 export function OAuthFlowStep({
   onSuccess,
   onCancel
@@ -66,12 +94,12 @@ export function OAuthFlowStep({
   }
   async function handleSubmitCode(value: string, url: string) {
     try {
-      // Expecting format "authorizationCode#state" from the authorization callback URL
-      const [authorizationCode, state] = value.split('#');
-      if (!authorizationCode || !state) {
+      const parsedInput = parseManualOAuthInput(value);
+      if (!parsedInput) {
         setOAuthStatus({
           state: 'error',
-          message: 'Invalid code. Please make sure the full code was copied',
+          message:
+            'Invalid input. Paste the full link from the browser exactly as-is — usually the localhost callback URL — or paste code#state.',
           toRetry: {
             state: 'waiting_for_login',
             url
@@ -79,6 +107,8 @@ export function OAuthFlowStep({
         });
         return;
       }
+
+      const { authorizationCode, state } = parsedInput;
 
       // Track which path the user is taking (manual code entry)
       logEvent('tengu_oauth_manual_entry', {});
@@ -211,10 +241,15 @@ export function OAuthFlowStep({
                 </Text>
               </Box>}
 
-            {showPastePrompt && <Box>
-                <Text>{PASTE_HERE_MSG}</Text>
-                <TextInput value={pastedCode} onChange={setPastedCode} onSubmit={(value_0: string) => handleSubmitCode(value_0, oauthStatus.url)} cursorOffset={cursorOffset} onChangeCursorOffset={setCursorOffset} columns={textInputColumns} />
-              </Box>}
+            {showPastePrompt && <>
+                <Box>
+                  <Text>{PASTE_HERE_MSG}</Text>
+                  <TextInput value={pastedCode} onChange={setPastedCode} onSubmit={(value_0: string) => handleSubmitCode(value_0, oauthStatus.url)} cursorOffset={cursorOffset} onChangeCursorOffset={setCursorOffset} columns={textInputColumns} />
+                </Box>
+                <Text dimColor>
+                  Paste the full link from the browser exactly as-is — usually the localhost callback URL — even if the page cannot be reached.
+                </Text>
+              </>}
           </Box>;
       case 'processing':
         return <Box>

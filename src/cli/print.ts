@@ -3480,7 +3480,7 @@ function runHeadlessStreaming(
             if (!hasCodeOrError) {
               sendControlResponseError(
                 message,
-                'Invalid callback URL: missing authorization code. Please paste the full redirect URL including the code parameter.',
+                'Invalid callback URL: missing authorization code. Please paste the full link from the browser exactly as-is, including the code parameter — usually the localhost callback URL.',
               )
             } else {
               oauthManualCallbackUsed.add(serverName)

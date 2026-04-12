@@ -25,7 +25,7 @@ import {
 } from '../../utils/modelReasoning.js';
 import { getDefaultMainLoopModelSetting, isOpus1mMergeEnabled, renderDefaultModelSetting } from '../../utils/model/model.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
-import { filterUnresolvedToolUses, stripSignatureBlocks } from '../../utils/messages.js';
+import { stripSignatureBlocks } from '../../utils/messages.js';
 
 function extractAccountName(baseURL: string | undefined, providerId: string): string {
   if (providerId === 'anthropic-like') {
@@ -251,7 +251,7 @@ function formatReasoningMessage(model: string | null, reasoning: ReasoningSelect
 }
 
 function filterMessagesAfterModelSwitch(prev: Message[]): Message[] {
-  return filterUnresolvedToolUses(stripSignatureBlocks(prev))
+  return stripSignatureBlocks(prev)
 }
 
 function ModelPickerWrapper({
@@ -457,64 +457,66 @@ function SetModelAndClose({
   return null;
 }
 
+
 function isKnownAlias(model: string): boolean {
   return (MODEL_ALIASES as readonly string[]).includes(model.toLowerCase().trim());
 }
+
 function isOpus1mUnavailable(model: string): boolean {
   const m = model.toLowerCase();
   return !checkOpus1mAccess() && !isOpus1mMergeEnabled() && m.includes('opus') && m.includes('[1m]');
 }
+
 function isSonnet1mUnavailable(model: string): boolean {
   const m = model.toLowerCase();
   return !checkSonnet1mAccess() && (m.includes('sonnet[1m]') || m.includes('sonnet-4-6[1m]'));
 }
-function ShowModelAndClose(t0) {
-  const {
-    onDone
-  } = t0;
-  const mainLoopModel = useAppState(_temp7);
-  const mainLoopModelForSession = useAppState(_temp8);
-  const effortValue = useAppState(_temp9);
+
+function ShowModelAndClose({
+  onDone,
+}: {
+  onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
+}): React.ReactNode {
+  const mainLoopModel = useAppState(s => s.mainLoopModel);
+  const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
+  const effortValue = useAppState(s => s.effortValue);
   const displayModel = renderModelLabel(mainLoopModel);
-  const effortInfo = effortValue !== undefined ? ` (effort: ${effortValue})` : "";
+  const effortInfo = effortValue !== undefined ? ` (effort: ${effortValue})` : '';
+
   if (mainLoopModelForSession) {
-    onDone(`Current model: ${chalk.bold(renderModelLabel(mainLoopModelForSession))} (session override from plan mode)\nBase model: ${displayModel}${effortInfo}`);
+    onDone(
+      `Current model: ${chalk.bold(renderModelLabel(mainLoopModelForSession))} (session override from plan mode)
+Base model: ${displayModel}${effortInfo}`,
+    );
   } else {
     onDone(`Current model: ${displayModel}${effortInfo}`);
   }
   return null;
 }
-function _temp9(s_1) {
-  return s_1.effortValue;
-}
-function _temp8(s_0) {
-  return s_0.mainLoopModelForSession;
-}
-function _temp7(s) {
-  return s.mainLoopModel;
-}
+
 export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   args = args?.trim() || '';
   if (COMMON_INFO_ARGS.includes(args)) {
     logEvent('tengu_model_command_inline_help', {
-      args: args as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+      args: args as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
     return <ShowModelAndClose onDone={onDone} />;
   }
   if (COMMON_HELP_ARGS.includes(args)) {
     onDone('Run /model to open the model selection menu, or /model [modelName] to set the model.', {
-      display: 'system'
+      display: 'system',
     });
     return;
   }
   if (args) {
     logEvent('tengu_model_command_inline', {
-      args: args as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+      args: args as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
     return <SetModelAndClose args={args} onDone={onDone} setMessages={context.setMessages} />;
   }
   return <ModelPickerWrapper onDone={onDone} setMessages={context.setMessages} />;
 };
+
 function renderModelLabel(model: string | null): string {
   const persistedCustomModel = readCustomApiStorage().model?.trim();
   if (model === null && persistedCustomModel) {

@@ -214,7 +214,8 @@ export function getToolSearchBetaHeader(): string {
  */
 export function shouldIncludeFirstPartyOnlyBetas(): boolean {
   return (
-    (getAPIProvider() === 'firstParty' || getAPIProvider() === 'foundry') &&
+    (getAPIProvider() === 'foundry' ||
+      (getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl())) &&
     !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
   )
 }
@@ -249,7 +250,11 @@ export const getAllModelBetas = memoize((model: string): string[] => {
       }
     }
   }
-  if (isClaudeAISubscriber()) {
+  if (
+    isClaudeAISubscriber() &&
+    getAPIProvider() === 'firstParty' &&
+    isFirstPartyAnthropicBaseUrl()
+  ) {
     betaHeaders.push(OAUTH_BETA_HEADER)
   }
   if (has1mContext(model)) {

@@ -19,10 +19,11 @@
 
 ## 近期重要更新
 
-更新于 **2026 年 4 月 8 日**
+更新于 **2026 年 4 月 13 日**
 
-- ⭐ **支持 `/context` 上下文来源显示与上下文窗口上限手动设置。**
-- ⭐ **支持 Responses API 缓存命中，显著降低成本并提速。**
+- ⭐ **`/login` 登录体系重写**：新增账号管理、Provider 分组、官方/自定义子菜单、分步配置与 OAuth 回填，整个登录链路从一次性录入升级为可持续管理的闭环。
+- ⭐ **正式支持 GitHub Copilot OAuth**：已实测 `gpt-5-mini`、`claude-haiku-4.5`、`gemini-3-flash-preview`，并补齐 OpenAI OAuth、Gemini CLI OAuth、Antigravity OAuth 等官方线路。
+- ⭐ **官方 / OAuth 线路支持自动写入模型列表**：OpenAI Official / OAuth、Gemini AI Studio / Gemini CLI OAuth、Antigravity OAuth、GitHub Copilot OAuth 登录完成后即可在 `/model` 直接切换。
 
 更多历史更新与细节说明请跳转查看：[详细更新日志](#详细更新日志)
 
@@ -64,44 +65,113 @@
 
 本项目提供两条关键命令来完成鉴权与模型管理：
 
-> 注意：如果你想使用 `GitHub Copilot OAuth` 或 `Antigravity OAuth`，请切换到 `dev` 分支。`dev` 分支当前极其不稳定，仅用于早期测试，不建议直接用于生产或日常主力环境。
+> 提示：相较云端 `main`，当前仓库已经额外支持 `GitHub Copilot OAuth`、`Antigravity OAuth` 与新版 `/login` 多级菜单流程；如果你此前只看过 `main` 版文档，以下内容以当前仓库实现为准。
 
-### 1\. `/login` — 绑定 Provider 与鉴权方式
+### 1\. `/login` — 新版多级登录入口
 
-`/login` 用于在 CLI 内部完成 Provider 鉴权配置，适合 API Key、OAuth 或自定义兼容网关登录流程。
+`/login` 现在不再只是“一次输入完 BaseURL 和 Key”的线性流程，而是一个可反复进入的账号管理与 Provider 配置入口。
 
-#### 基本使用
+#### 进入后的总流程
 
-```text
-/login
-```
+- **已有已保存账号时**：先进入 `Manage accounts`
+- **首次使用或无已保存账号时**：直接进入 `Select provider`
 
-执行后，CLI 会依次提示：
+#### 子菜单 1：`Manage accounts`
 
-  * 选择 Provider 类型（例如 Anthropic-compatible、OpenAI-compatible、Gemini-compatible 等）
-  * 选择鉴权方式（API Key、OAuth、或其他自定义模式）
-  * 输入或粘贴对应的鉴权信息
+如果本地已经保存过 Provider，`/login` 会先展示账号管理列表，每个条目都会显示：
 
-#### 常见场景
+- Provider 显示名
+- Provider 类型
+- 当前已保存的模型数量
 
-  * `API Key`：直接输入 `apiKey` 或 `accessToken`，适用于大多数兼容网关。
-  * `OAuth`：如果 Provider 支持 OAuth，CLI 会引导你完成授权流程并在本地保存令牌。
-  * 多 Provider 并存：每个 `Provider + authMode` 组合都会独立存储，避免鉴权信息错误复用。
+在这里你可以：
 
-  * OpenAI-compatible 路径目前已支持 `Chat Completions`、`Responses` 与 `OAuth`，例如你有 ChatGPT Plus 时，也可以走对应 OAuth 能力接入。
+- 选择某个已保存 Provider，进入其操作子菜单
+- 选择 `Add new account →` 新增一条 Provider 配置
+- 选择 `Done →` 退出 `/login`
 
-#### 结果
+#### 子菜单 2：`Provider actions`
 
-登录成功后，鉴权信息会写入项目配置路径，如：
+选中某个已保存 Provider 后，会进入操作菜单：
 
-  * `.claude/settings.local.json`
-  * `~/.cloai/settings.json`
+- `Logout`
+- `Back`
 
-这意味着你可以在当前项目或全局环境中直接切换模型与 Provider，而无需重复登录。
+其中 `Logout` 会继续进入确认删除菜单。确认后会删除这一条已保存的 Provider 配置，并自动切换到下一条可用 Provider；如果已经没有其他账号，则回到 Provider 选择入口。
 
-### 2\. `/model` — 选择、注册与管理模型
+#### 子菜单 3：`Select provider`
 
-`/model` 用于查看可用模型、切换当前模型，以及注册自定义模型信息。
+新增账号时，会进入 Provider 根菜单。当前入口包括：
+
+- `Claude`：官方 Anthropic 登录
+- `OpenAI →`：进入 OpenAI 子菜单
+- `Google Gemini →`：进入 Gemini 子菜单
+- `Antigravity`：官方 OAuth
+- `GitHub Copilot OAuth`：官方 OAuth
+- `Custom →`：手动配置兼容接口
+
+#### 子菜单 4：`Provider variant select`
+
+不同分组会展开不同子菜单：
+
+- `OpenAI →`
+  - `Official Responses API`
+  - `OAuth`
+- `Google Gemini →`
+  - `Gemini CLI OAuth`
+  - `Google AI Studio API key`
+- `Custom →`
+  - `Anthropic-Like`
+  - `OpenAI-Like`
+  - `Google-Vertex-Like`
+
+#### 子菜单 5：`Configure official provider` / `Configure custom provider`
+
+选定线路后，会进入分步配置阶段，不同线路的输入步骤不同：
+
+- **Claude Official / OpenAI OAuth / Gemini CLI OAuth / Antigravity OAuth**
+  - 直接进入浏览器 OAuth 流程
+- **GitHub Copilot OAuth**
+  - 先输入可选的 `GitHub Enterprise domain`
+  - 然后进入设备码 / 浏览器授权流程
+- **OpenAI Official Responses API**
+  - 输入 OpenAI API Key
+  - CLI 会自动拉取官方模型列表并保存
+- **Google Gemini AI Studio**
+  - 输入 API Key
+  - CLI 会自动拉取支持 `generateContent` 的模型列表并保存
+- **OpenAI-Like**
+  - 先选择 `chat/completions` 或 `Responses API`
+  - 再输入 BaseURL、API Key、模型列表
+- **Anthropic-Like / Google-Vertex-Like**
+  - 输入 BaseURL、API Key、模型列表
+
+#### 子菜单 6：`Ready to start` / `Waiting for login`
+
+当进入 OAuth 线路后，CLI 会自动开始授权流程：
+
+- 自动尝试打开浏览器
+- 在终端展示等待登录状态
+- 无法自动回调时，可手动粘贴完整回调 URL，或粘贴 `code#state`
+- `GitHub Copilot OAuth` 会额外显示 device flow 的提示信息
+
+#### 登录完成后会发生什么
+
+登录成功后，CLI 会：
+
+- 将当前 Provider 以独立记录保存下来
+- 按 `Provider + authMode + variant + baseURL` 维度隔离登录态
+- 自动回填或写入该线路对应的模型列表
+- 让 `/model` 立即可见并可切换这些模型
+
+配置会写入项目级或用户级配置路径，例如：
+
+- `.claude/settings.local.json`
+- `~/.cloai/settings.json`
+
+### 2\. `/model` — 读取已登录 Provider 并切换模型
+
+`/model` 会读取 `/login` 已保存的 Provider 记录，并将它们作为可切换模型来源。
 
 #### 基本使用
 
@@ -111,56 +181,42 @@
 
 执行后，CLI 会显示：
 
-  * 当前可用模型列表
-  * 当前选中的模型
-  * 模型来源（Provider / gateway / 本地注册表）
+- 当前可用模型列表
+- 当前选中的模型
+- 模型所属的 Provider / 账号 / 鉴权方式
 
-#### 切换模型
+#### 新版显示逻辑
 
-在 `/model` 交互中，使用方向键选择目标模型，按回车确认即可。
+在 `/model` 列表中：
 
-如果你希望切换到自定义网关中的某个模型，先使用 `/login` 绑定对应 Provider，再通过 `/model` 选择它。
-
-#### 注册自定义模型
-
-如果你的兼容网关暴露了非默认模型名称，可以在 `/model` 交互中添加自定义模型条目，或者直接编辑本地模型注册文件：
-
-```json
-{
-  "modelRegistry": [
-    {
-      "name": "gpt-5.4",
-      "provider": "OpenAI-compatible",
-      "baseURL": "https://your-gateway.example.com/v1",
-      "description": "Custom gateway model"
-    }
-  ]
-}
-```
+- 模型条目会带上账号或 Provider 名称，便于区分同名模型来自哪一路登录
+- 同一个模型名可以在不同 Provider 下并存
+- `/login` 自动回填的 OAuth 模型列表会直接出现在这里，无需再手工补录
 
 #### 推荐流程
 
-  1. 运行 `/login` 完成 Provider 鉴权
-  2. 运行 `/model` 选择目标模型
-  3. 在会话中直接开始提问、调用或测试
+1. 运行 `/login` 新增或管理 Provider
+2. 完成 API Key / OAuth 登录
+3. 运行 `/model` 选择目标模型
+4. 开始会话与测试
 
 #### 说明
 
-  * `/login` 负责“谁来提供模型”和“如何鉴权”。
-  * `/model` 负责“用哪个模型”和“如何映射当前会话”。
-  * 这两者配合使用，可以实现原生多 Provider、原生多鉴权、原生模型切换的闭环体验。
+- `/login` 负责“接哪一家、用哪种鉴权、保存哪一组模型”
+- `/model` 负责“当前会话用哪一个具体模型”
+- 二者配合后，可以稳定支持多 Provider、多账号、多鉴权方式并存
 
 -----
 
 ## ✅ 已验证模型与网关接入
 
-本项目最核心的能力，就是**通过兼容网关直接接入不同模型**，而不是把模型切换逻辑外包给外围工具。
+本项目最核心的能力，是把不同 Provider 的 API Key、OAuth 与 compatible gateway 统一收敛到 CLI 内部，而不是依赖外围切换器。
 
-目前已经实际验证通过的主线路有三类：
+目前已经实际验证通过的主线路如下：
 
 ### 1\. Anthropic 兼容网关
 
-适用于提供 **Anthropic Messages / Claude 风格请求格式**的兼容服务、代理网关和第三方平台。
+适用于提供 **Anthropic Messages / Claude 风格请求格式** 的兼容服务、代理网关和第三方平台。
 
 **已验证模型：**
 
@@ -170,13 +226,13 @@
 
 **这一类通常可以承接的模型方向：**
 
-  * 任何被网关包装成 **Anthropic/Claude 兼容协议** 的第三方模型
-  * 各类自建中转、聚合网关、代理平台中映射成 Claude 风格 API 的模型
-  * 典型场景是：你不一定真的在调用 Anthropic 官方模型，但你可以通过 **Anthropic 兼容层**把目标模型接进 `cloaiCode`
+- 任何被网关包装成 **Anthropic / Claude 兼容协议** 的第三方模型
+- 各类自建中转、聚合网关、代理平台中映射成 Claude 风格 API 的模型
+- 典型场景是：你不一定真的在调用 Anthropic 官方模型，但你可以通过 **Anthropic 兼容层** 把目标模型接进 `cloaiCode`
 
 ### 2\. OpenAI 兼容网关
 
-适用于提供 **Chat Completions / Responses / OAuth** 的 OpenAI 风格接口平台。这一条线路是当前最重要、也最值得详细写清楚的主线路之一。
+适用于提供 **Chat Completions / Responses / OAuth** 的 OpenAI 风格接口平台。
 
 **已验证模型：**
 
@@ -188,16 +244,14 @@
 
 **这一类可接入的模型方向：**
 
-  * `gpt-5.4`
-  * 其他被你的网关暴露为 **OpenAI Chat Completions** 接口的模型
-  * 其他被你的网关暴露为 **OpenAI Responses** 接口的模型
-  * 各类通过 OpenAI 风格 `baseURL + apiKey` 即可调用的第三方模型
-
-
+- `gpt-5.4`
+- 其他被你的网关暴露为 **OpenAI Chat Completions** 接口的模型
+- 其他被你的网关暴露为 **OpenAI Responses** 接口的模型
+- 各类通过 OpenAI 风格 `baseURL + apiKey` 即可调用的第三方模型
 
 ### 3\. Gemini 兼容网关
 
-适用于提供 **Gemini 风格接口**或 Gemini CLI OAuth 路径的服务。
+适用于提供 **Gemini 风格接口** 或 Gemini CLI OAuth 路径的服务。
 
 **已验证模型：**
 
@@ -208,15 +262,43 @@
 
 **这一类可以重点接入的模型方向：**
 
-  * `gemini-3-flash-preview`
-  * `gemini-3.1-pro-high`
-  * 其他被网关或 CLI 入口包装成 **Gemini-compatible** 请求路径的模型
+- `gemini-3-flash-preview`
+- `gemini-3.1-pro-high`
+- 其他被网关或 CLI 入口包装成 **Gemini-compatible** 请求路径的模型
 
-`cloaiCode` 已经把三条关键网关接入打通：
+### 4\. GitHub Copilot OAuth
 
-  * **Anthropic 兼容网关接入第三方模型**
-  * **OpenAI 兼容网关接入第三方模型**
-  * **Gemini 兼容网关接入第三方模型**
+适用于使用 GitHub / GitHub Enterprise 账号接入 Copilot Chat 对应模型额度。完成登录后，CLI 会自动启用并写入 Copilot 模型列表。
+
+**已验证模型：**
+
+| 模型名称 | 接入方式 | 备注 |
+| :--- | :--- | :--- |
+| `gpt-5-mini` | GitHub Copilot OAuth | 已实测 |
+| `claude-haiku-4.5` | GitHub Copilot OAuth | 已实测 |
+| `gemini-3-flash-preview` | GitHub Copilot OAuth | 已实测 |
+
+**这一类线路的特点：**
+
+- 支持 `github.com` 与可选 GitHub Enterprise 域名
+- 登录完成后会自动启用并写入 Copilot 模型列表
+- 在 `/model` 中会与其他 Provider 一起展示和切换
+
+### 5\. OAuth / 官方线路的模型列表自动回填
+
+当前各条官方 / OAuth 线路都已支持模型列表自动写入，避免登录完成后还要手工补 `savedModels`：
+
+- **OpenAI Official Responses API**：保存 API Key 后自动拉取官方模型列表
+- **OpenAI OAuth**：登录成功后自动写入可用模型列表
+- **Google Gemini AI Studio**：保存 API Key 后自动拉取支持 `generateContent` 的模型列表
+- **Gemini CLI OAuth / Antigravity OAuth / GitHub Copilot OAuth**：登录成功后自动写入对应线路的模型列表
+
+`cloaiCode` 已经把这些关键接入链路统一收敛到同一套 CLI 交互之中：
+
+- **Anthropic 兼容网关接入第三方模型**
+- **OpenAI 兼容网关与官方 OAuth / Responses 路径**
+- **Gemini 兼容网关与官方 OAuth / AI Studio 路径**
+- **GitHub Copilot OAuth**
 
 -----
 
@@ -481,52 +563,150 @@ bun link @cloai-code/cli
 
 ## 🔐 灵活的鉴权与登录体系
 
-在模型供应商添加方面，根据用户您选择的 Provider，支持以下鉴权策略：
+新版 `/login` 不再是一次性输入配置，而是一个长期可维护的 Provider 登录台。当前登录体系可以分为以下几类：
 
-### 1\. API Key 模式 (作者推荐)
+### 1\. API Key 模式
 
-  * **适用场景**：Anthropic 兼容服务、OpenAI 兼容服务、各类代理/网关及第三方模型中转平台（如反重力）。
-  * **优势**：最稳定、最易于自动化集成。完美适配服务器、容器、远程终端等纯无头环境。🔑
+- **适用场景**：Anthropic-compatible、OpenAI-compatible、Google-Vertex-Like 等自定义兼容接口。
+- **官方 API Key 线路**：
+  - `OpenAI Official Responses API`
+  - `Google Gemini AI Studio`
+- **特点**：适合服务器、容器、远程终端等纯无头环境，稳定、易排障、易自动化。
+- **新版补强**：官方 API Key 线路保存成功后，会自动拉取并写入模型列表，而不是要求用户手工补 `savedModels`。
 
 ### 2\. OAuth 模式
 
-  * **适用场景**：部分原生支持 OAuth 的 Provider 或特殊接入路径。
-  * **优势**：当运行环境已具备相应图形化或浏览器回调条件时，可作为 API Key 的补充方案，允许你使用你的 Codex 额度或 Gemini CLI 额度。
+当前已支持以下 OAuth 线路：
+
+- `Claude Official`
+- `OpenAI OAuth`
+- `Gemini CLI OAuth`
+- `Antigravity OAuth`
+- `GitHub Copilot OAuth`
+
+**特点：**
+
+- CLI 会自动尝试打开浏览器完成授权。
+- 在无法自动回调时，可手动粘贴完整回调 URL，或直接粘贴 `code#state`。
+- `GitHub Copilot OAuth` 支持可选的 `GitHub Enterprise domain`，并使用 device flow / browser flow 完成授权。
 
 ### 3\. Provider 级独立鉴权沙盒
 
-系统会对 **“Provider + authMode”** 的组合关系进行严格的持久化绑定。彻底终结以下痛点：
+系统现在按 **`Provider + authMode + variant + baseURL`** 维度隔离登录态与模型列表，重点解决以下问题：
 
-  * 切换 Provider 后错误沿用上一家的鉴权令牌。
-  * 同一 Provider 下，不同鉴权模式的数据被互相覆盖。
-  * 重启 CLI 后初始鉴权选项识别紊乱。
+- 切换 Provider 后错误沿用上一家的鉴权令牌。
+- 同一 Provider 下，不同登录方式的数据被互相覆盖。
+- OpenAI / Gemini 官方线路与自定义兼容线路的状态串线。
+- 同名模型在多 Provider 并存时难以切换和识别。
 
-这对于需要频繁在多家大模型服务商之间横跳的重度用户（薅羊毛人士）而言，将会大大大提升体验感🧠
+### 4\. 已保存账号管理
+
+当本地已有已保存 Provider 时，`/login` 会先进入 `Manage accounts`：
+
+- 展示每个账号的 Provider 名称、Provider 类型与模型数量。
+- 支持 `Add new account →` 继续新增账号。
+- 支持 `Logout` → `Remove account` 删除某条已保存记录。
+- 删除后会自动切换到剩余账号；如果已经没有账号，则回到 Provider 选择入口。
+
+这意味着新版 `/login` 已从“录入参数”升级为“管理账号 + 登录 + 回填模型 + 切换来源”的完整闭环。
 
 -----
 
 ## 🧭 Provider 路由与选择指南
 
-我们重新写了 Provider 的选择逻辑，使其更加自然且意图明确。在实际配置中，你通常需要面对以下三个维度的选择：
+当前 `/login` 的选择路径与子菜单逻辑如下，以下描述与当前仓库实现保持一致。
 
-### 1\. Anthropic 兼容线路
+### 1\. `Manage accounts`
 
-  * **目标场景**：自建网关、代理服务、第三方兼容平台，以及已验证的 `minimax-m2.7-highspeed` 接入。
-  * **特点**：追求稳定与极简路径的不二之选。
+如果本地已有已保存账号，进入 `/login` 后会先看到：
 
-### 2\. OpenAI 兼容线路
+- 已保存 Provider 列表
+- `Add new account →`
+- `Done →`
 
-  * **目标场景**：提供 Chat Completions / Responses 标准接口的平台，接入 `gpt-5.4` 等核心模型，或需要兼容 OAuth 工作流的场景。
-  * **典型模型方向**：`gpt-5.4`，以及任意被你的网关映射成 OpenAI 风格协议的第三方模型。
+选择某个账号后，会进入该账号的 `Provider actions` 子菜单。
 
-### 3\. Gemini 兼容线路
+### 2\. `Provider actions`
 
-  * **目标场景**：提供 Gemini 风格接口或 Gemini CLI OAuth 工作流的平台，接入 `gemini-3-flash-preview`、`gemini-3.1-pro-high` 等模型。
-  * **特点**：适合需要接入 Gemini 系模型，但又希望统一纳入同一套 CLI 交互、配置与模型选择逻辑的场景。
+已保存账号的操作菜单目前包含：
 
-### 4\. 相同 Provider 的多路鉴权分化
+- `Logout`
+- `Back`
 
-同一个 Provider 的不同鉴权模式，可以重复添加，保证多个模型供应商都可以同时接入，随时切换。
+其中 `Logout` 会继续进入确认删除页；确认后删除这一条 Provider 配置。
+
+### 3\. `Select provider`
+
+新增账号时，会进入 Provider 根菜单，当前入口为：
+
+- `Claude`
+- `OpenAI →`
+- `Google Gemini →`
+- `Antigravity`
+- `GitHub Copilot OAuth`
+- `Custom →`
+
+### 4\. `OpenAI →` 子菜单
+
+进入 `OpenAI →` 后，可选：
+
+- `Official Responses API`
+- `OAuth`
+- `← Back`
+
+对应含义：
+
+- **Official Responses API**：官方 API Key 线路，固定 `api.openai.com`，保存 Key 后自动拉取模型列表。
+- **OAuth**：官方浏览器授权线路，完成登录后自动写入可用模型列表。
+
+### 5\. `Google Gemini →` 子菜单
+
+进入 `Google Gemini →` 后，可选：
+
+- `Gemini CLI OAuth`
+- `Google Cloud API`
+- `← Back`
+
+对应含义：
+
+- **Gemini CLI OAuth**：官方浏览器授权线路。
+- **Google Cloud API`**（界面文案）/ **Google Gemini AI Studio**（保存后的 Provider 类型）：API Key 线路，保存 Key 后自动拉取支持 `generateContent` 的模型列表。
+
+### 6\. `Custom →` 子菜单
+
+进入 `Custom →` 后，可选：
+
+- `Anthropic-Like`
+- `OpenAI-Like`
+- `Google-Vertex-Like`
+- `← Back`
+
+其后续配置逻辑为：
+
+- **Anthropic-Like**：输入 BaseURL、API Key、模型列表。
+- **OpenAI-Like**：先选 `chat/completions` 或 `Responses API`，再输入 BaseURL、API Key、模型列表。
+- **Google-Vertex-Like**：输入 BaseURL、API Key、模型列表。
+
+### 7\. `Configure official provider` / `Configure custom provider`
+
+在真正保存前，CLI 会根据线路进入不同的分步输入页面：
+
+- `copilotEnterprise`：仅 GitHub Copilot OAuth 使用，用于输入可选 Enterprise 域名。
+- `authMode`：仅 OpenAI-Like 使用，用于选择 `chat/completions` 或 `Responses API`。
+- `baseURL`
+- `apiKey`
+- `models`
+
+### 8\. `Ready to start` / `Waiting for login`
+
+当选择 OAuth 线路后，CLI 会：
+
+- 进入 `Ready to start`
+- 自动启动浏览器或 device flow
+- 在 `Waiting for login` 中等待登录完成
+- 必要时允许手动粘贴回调信息
+
+因此，整个 `/login` 已经从旧版的“选 Provider → 输参数”演进为一套多账号、多 Provider、多鉴权方式共存的正式路由系统。
 
 -----
 
@@ -620,6 +800,13 @@ cloai
 -----
 
 ## 详细更新日志
+
+### 2026 年 4 月 13 日更新
+
+- 对照云端 `main`，重写 `/login` 登录文档：补齐 `Manage accounts`、`Provider actions`、`Select provider`、`Provider variant select`、`Configure official provider`、`Configure custom provider`、`Ready to start`、`Waiting for login` 等新版子菜单与状态流转说明。
+- 正式加入 `GitHub Copilot OAuth`：支持 `github.com` 与可选 `GitHub Enterprise domain`，登录完成后自动启用并写入 Copilot 模型列表；已实测 `gpt-5-mini`、`claude-haiku-4.5`、`gemini-3-flash-preview`。
+- `OpenAI Official Responses API`、`OpenAI OAuth`、`Google Gemini AI Studio`、`Gemini CLI OAuth`、`Antigravity OAuth`、`GitHub Copilot OAuth` 现已统一支持模型列表自动回填，登录成功后可直接在 `/model` 中选择。
+- `/model` 文档同步更新为新版行为：支持读取已保存 Provider 记录，以“模型名 + 账号 / Provider 名称”的形式展示同名模型的不同来源。
 
 ### 2026 年 4 月 9 日更新
 

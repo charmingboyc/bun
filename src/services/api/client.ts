@@ -15,6 +15,7 @@ import { getSmallFastModel } from 'src/utils/model/model.js'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
+  isFirstPartyAnthropicBaseUrlValue,
 } from 'src/utils/model/providers.js'
 import {
   getActiveProviderConfig,
@@ -159,11 +160,19 @@ export async function getAnthropicClient({
     Object.assign(defaultHeaders, defaultHeadersOverride)
   }
 
-  logForDebugging('[API:auth] OAuth token check starting')
-  await checkAndRefreshOAuthTokenIfNeeded()
-  logForDebugging('[API:auth] OAuth token check complete')
+  const resolvedBaseURL = baseURLOverride ?? activeProviderConfig?.baseURL
+  const useClaudeSubscriberAuth =
+    customApiProvider === 'anthropic' &&
+    isFirstPartyAnthropicBaseUrlValue(resolvedBaseURL) &&
+    isClaudeAISubscriber()
 
-  if (!isClaudeAISubscriber() && authTokenOverride === undefined) {
+  if (useClaudeSubscriberAuth) {
+    logForDebugging('[API:auth] OAuth token check starting')
+    await checkAndRefreshOAuthTokenIfNeeded()
+    logForDebugging('[API:auth] OAuth token check complete')
+  }
+
+  if (!useClaudeSubscriberAuth && authTokenOverride === undefined) {
     await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
@@ -329,18 +338,17 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
-  const resolvedBaseURL = baseURLOverride ?? activeProviderConfig?.baseURL
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
-    apiKey: isClaudeAISubscriber()
+    apiKey: useClaudeSubscriberAuth
       ? null
       : apiKey !== undefined
         ? apiKey
-        : getAnthropicApiKey(),
+        : activeProviderConfig?.kind === 'anthropic-like'
+          ? activeProviderConfig.apiKey ?? getAnthropicApiKey()
+          : getAnthropicApiKey(),
     authToken:
       authTokenOverride ??
-      (isClaudeAISubscriber()
-        ? getClaudeAIOAuthTokens()?.accessToken
-        : undefined),
+      (useClaudeSubscriberAuth ? getClaudeAIOAuthTokens()?.accessToken : undefined),
     // Set baseURL from OAuth config when using staging OAuth
     ...(process.env.USER_TYPE === 'ant' &&
     isEnvTruthy(process.env.USE_STAGING_OAUTH)

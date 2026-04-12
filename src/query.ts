@@ -1358,391 +1358,389 @@ async function* queryLoop(
       return { reason: 'completed' }
     }
 
-    let shouldPreventContinuation = false
-    let updatedToolUseContext = toolUseContext
+    if (needsFollowUp) {
+      let shouldPreventContinuation = false
+      let updatedToolUseContext = toolUseContext
 
-    queryCheckpoint('query_tool_execution_start')
+      queryCheckpoint('query_tool_execution_start')
 
 
-    if (streamingToolExecutor) {
-      logEvent('tengu_streaming_tool_execution_used', {
-        tool_count: toolUseBlocks.length,
-        queryChainId: queryChainIdForAnalytics,
-        queryDepth: queryTracking.depth,
-      })
-    } else {
-      logEvent('tengu_streaming_tool_execution_not_used', {
-        tool_count: toolUseBlocks.length,
-        queryChainId: queryChainIdForAnalytics,
-        queryDepth: queryTracking.depth,
-      })
-    }
-
-    const toolUpdates = streamingToolExecutor
-      ? streamingToolExecutor.getRemainingResults()
-      : runTools(toolUseBlocks, assistantMessages, canUseTool, toolUseContext)
-
-    for await (const update of toolUpdates) {
-      if (update.message) {
-        yield update.message
-
-        if (
-          update.message.type === 'attachment' &&
-          update.message.attachment.type === 'hook_stopped_continuation'
-        ) {
-          shouldPreventContinuation = true
-        }
-
-        toolResults.push(
-          ...normalizeMessagesForAPI(
-            [update.message],
-            toolUseContext.options.tools,
-          ).filter(_ => _.type === 'user'),
-        )
-      }
-      if (update.newContext) {
-        updatedToolUseContext = {
-          ...update.newContext,
-          queryTracking,
-        }
-      }
-    }
-    queryCheckpoint('query_tool_execution_end')
-
-    // Generate tool use summary after tool batch completes — passed to next recursive call
-    let nextPendingToolUseSummary:
-      | Promise<ToolUseSummaryMessage | null>
-      | undefined
-    if (
-      config.gates.emitToolUseSummaries &&
-      toolUseBlocks.length > 0 &&
-      !toolUseContext.abortController.signal.aborted &&
-      !toolUseContext.agentId // subagents don't surface in mobile UI — skip the Haiku call
-    ) {
-      // Extract the last assistant text block for context
-      const lastAssistantMessage = assistantMessages.at(-1)
-      let lastAssistantText: string | undefined
-      if (lastAssistantMessage) {
-        const textBlocks = lastAssistantMessage.message.content.filter(
-          block => block.type === 'text',
-        )
-        if (textBlocks.length > 0) {
-          const lastTextBlock = textBlocks.at(-1)
-          if (lastTextBlock && 'text' in lastTextBlock) {
-            lastAssistantText = lastTextBlock.text
-          }
-        }
-      }
-
-      // Collect tool info for summary generation
-      const toolUseIds = toolUseBlocks.map(block => block.id)
-      const toolInfoForSummary = toolUseBlocks.map(block => {
-        // Find the corresponding tool result
-        const toolResult = toolResults.find(
-          result =>
-            result.type === 'user' &&
-            Array.isArray(result.message.content) &&
-            result.message.content.some(
-              content =>
-                content.type === 'tool_result' &&
-                content.tool_use_id === block.id,
-            ),
-        )
-        const resultContent =
-          toolResult?.type === 'user' &&
-          Array.isArray(toolResult.message.content)
-            ? toolResult.message.content.find(
-                (c): c is ToolResultBlockParam =>
-                  c.type === 'tool_result' && c.tool_use_id === block.id,
-              )
-            : undefined
-        return {
-          name: block.name,
-          input: block.input,
-          output:
-            resultContent && 'content' in resultContent
-              ? resultContent.content
-              : null,
-        }
-      })
-
-      // Fire off summary generation without blocking the next API call
-      nextPendingToolUseSummary = generateToolUseSummary({
-        tools: toolInfoForSummary,
-        signal: toolUseContext.abortController.signal,
-        isNonInteractiveSession: toolUseContext.options.isNonInteractiveSession,
-        lastAssistantText,
-      })
-        .then(summary => {
-          if (summary) {
-            return createToolUseSummaryMessage(summary, toolUseIds)
-          }
-          return null
+      if (streamingToolExecutor) {
+        logEvent('tengu_streaming_tool_execution_used', {
+          tool_count: toolUseBlocks.length,
+          queryChainId: queryChainIdForAnalytics,
+          queryDepth: queryTracking.depth,
         })
-        .catch(() => null)
-    }
+      } else {
+        logEvent('tengu_streaming_tool_execution_not_used', {
+          tool_count: toolUseBlocks.length,
+          queryChainId: queryChainIdForAnalytics,
+          queryDepth: queryTracking.depth,
+        })
+      }
 
-    // We were aborted during tool calls
-    if (toolUseContext.abortController.signal.aborted) {
-      // chicago MCP: auto-unhide + lock release when aborted mid-tool-call.
-      // This is the most likely Ctrl+C path for CU (e.g. slow screenshot).
-      // Main thread only — see stopHooks.ts for the subagent rationale.
-      if (feature('CHICAGO_MCP') && !toolUseContext.agentId) {
-        try {
-          const { cleanupComputerUseAfterTurn } = await import(
-            './utils/computerUse/cleanup.js'
+      const toolUpdates = streamingToolExecutor
+        ? streamingToolExecutor.getRemainingResults()
+        : runTools(toolUseBlocks, assistantMessages, canUseTool, toolUseContext)
+
+      for await (const update of toolUpdates) {
+        if (update.message) {
+          yield update.message
+
+          if (
+            update.message.type === 'attachment' &&
+            update.message.attachment.type === 'hook_stopped_continuation'
+          ) {
+            shouldPreventContinuation = true
+          }
+
+          toolResults.push(
+            ...normalizeMessagesForAPI(
+              [update.message],
+              toolUseContext.options.tools,
+            ).filter(_ => _.type === 'user'),
           )
-          await cleanupComputerUseAfterTurn(toolUseContext)
-        } catch {
-          // Failures are silent — this is dogfooding cleanup, not critical path
+        }
+        if (update.newContext) {
+          updatedToolUseContext = {
+            ...update.newContext,
+            queryTracking,
+          }
         }
       }
-      // Skip the interruption message for submit-interrupts — the queued
-      // user message that follows provides sufficient context.
-      if (toolUseContext.abortController.signal.reason !== 'interrupt') {
-        yield createUserInterruptionMessage({
-          toolUse: true,
+      queryCheckpoint('query_tool_execution_end')
+
+      // Generate tool use summary after tool batch completes — passed to next recursive call
+      let nextPendingToolUseSummary:
+        | Promise<ToolUseSummaryMessage | null>
+        | undefined
+      if (
+        config.gates.emitToolUseSummaries &&
+        toolUseBlocks.length > 0 &&
+        !toolUseContext.abortController.signal.aborted &&
+        !toolUseContext.agentId // subagents don't surface in mobile UI — skip the Haiku call
+      ) {
+        // Extract the last assistant text block for context
+        const lastAssistantMessage = assistantMessages.at(-1)
+        let lastAssistantText: string | undefined
+        if (lastAssistantMessage) {
+          const textBlocks = lastAssistantMessage.message.content.filter(
+            block => block.type === 'text',
+          )
+          if (textBlocks.length > 0) {
+            const lastTextBlock = textBlocks.at(-1)
+            if (lastTextBlock && 'text' in lastTextBlock) {
+              lastAssistantText = lastTextBlock.text
+            }
+          }
+        }
+
+        // Collect tool info for summary generation
+        const toolUseIds = toolUseBlocks.map(block => block.id)
+        const toolInfoForSummary = toolUseBlocks.map(block => {
+          // Find the corresponding tool result
+          const toolResult = toolResults.find(
+            result =>
+              result.type === 'user' &&
+              Array.isArray(result.message.content) &&
+              result.message.content.some(
+                content =>
+                  content.type === 'tool_result' &&
+                  content.tool_use_id === block.id,
+              ),
+          )
+          const resultContent =
+            toolResult?.type === 'user' &&
+            Array.isArray(toolResult.message.content)
+              ? toolResult.message.content.find(
+                  (c): c is ToolResultBlockParam =>
+                    c.type === 'tool_result' && c.tool_use_id === block.id,
+                )
+              : undefined
+          return {
+            name: block.name,
+            input: block.input,
+            output:
+              resultContent && 'content' in resultContent
+                ? resultContent.content
+                : null,
+          }
+        })
+
+        // Fire off summary generation without blocking the next API call
+        nextPendingToolUseSummary = generateToolUseSummary({
+          tools: toolInfoForSummary,
+          signal: toolUseContext.abortController.signal,
+          isNonInteractiveSession:
+            toolUseContext.options.isNonInteractiveSession,
+          lastAssistantText,
+        })
+          .then(summary => {
+            if (summary) {
+              return createToolUseSummaryMessage(summary, toolUseIds)
+            }
+            return null
+          })
+          .catch(() => null)
+      }
+
+      // We were aborted during tool calls
+      if (toolUseContext.abortController.signal.aborted) {
+        // chicago MCP: auto-unhide + lock release when aborted mid-tool-call.
+        // This is the most likely Ctrl+C path for CU (e.g. slow screenshot).
+        // Main thread only — see stopHooks.ts for the subagent rationale.
+        if (feature('CHICAGO_MCP') && !toolUseContext.agentId) {
+          try {
+            const { cleanupComputerUseAfterTurn } = await import(
+              './utils/computerUse/cleanup.js'
+            )
+            await cleanupComputerUseAfterTurn(toolUseContext)
+          } catch {
+            // Failures are silent — this is dogfooding cleanup, not critical path
+          }
+        }
+        // Skip the interruption message for submit-interrupts — the queued
+        // user message that follows provides sufficient context.
+        if (toolUseContext.abortController.signal.reason !== 'interrupt') {
+          yield createUserInterruptionMessage({
+            toolUse: true,
+          })
+        }
+        // Check maxTurns before returning when aborted
+        const nextTurnCountOnAbort = turnCount + 1
+        if (maxTurns && nextTurnCountOnAbort > maxTurns) {
+          yield createAttachmentMessage({
+            type: 'max_turns_reached',
+            maxTurns,
+            turnCount: nextTurnCountOnAbort,
+          })
+        }
+        return { reason: 'aborted_tools' }
+      }
+
+      // If a hook indicated to prevent continuation, stop here
+      if (shouldPreventContinuation) {
+        return { reason: 'hook_stopped' }
+      }
+
+      if (tracking?.compacted) {
+        tracking.turnCounter++
+        logEvent('tengu_post_autocompact_turn', {
+          turnId:
+            tracking.turnId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          turnCounter: tracking.turnCounter,
+
+          queryChainId: queryChainIdForAnalytics,
+          queryDepth: queryTracking.depth,
         })
       }
-      // Check maxTurns before returning when aborted
-      const nextTurnCountOnAbort = turnCount + 1
-      if (maxTurns && nextTurnCountOnAbort > maxTurns) {
+
+      // Be careful to do this after tool calls are done, because the API
+      // will error if we interleave tool_result messages with regular user messages.
+
+      // Instrumentation: Track message count before attachments
+      logEvent('tengu_query_before_attachments', {
+        messagesForQueryCount: messagesForQuery.length,
+        assistantMessagesCount: assistantMessages.length,
+        toolResultsCount: toolResults.length,
+        queryChainId: queryChainIdForAnalytics,
+        queryDepth: queryTracking.depth,
+      })
+
+      // Get queued commands snapshot before processing attachments.
+      // These will be sent as attachments so Claude can respond to them in the current turn.
+      //
+      // Drain pending notifications. LocalShellTask completions are 'next'
+      // (when MONITOR_TOOL is on) and drain without Sleep. Other task types
+      // (agent/workflow/framework) still default to 'later' — the Sleep flush
+      // covers those. If all task types move to 'next', this branch could go.
+      //
+      // Slash commands are excluded from mid-turn drain — they must go through
+      // processSlashCommand after the turn ends (via useQueueProcessor), not be
+      // sent to the model as text. Bash-mode commands are already excluded by
+      // INLINE_NOTIFICATION_MODES in getQueuedCommandAttachments.
+      //
+      // Agent scoping: the queue is a process-global singleton shared by the
+      // coordinator and all in-process subagents. Each loop drains only what's
+      // addressed to it — main thread drains agentId===undefined, subagents
+      // drain their own agentId. User prompts (mode:'prompt') still go to main
+      // only; subagents never see the prompt stream.
+      // eslint-disable-next-line custom-rules/require-tool-match-name -- ToolUseBlock.name has no aliases
+      const sleepRan = toolUseBlocks.some(b => b.name === SLEEP_TOOL_NAME)
+      const isMainThread =
+        querySource.startsWith('repl_main_thread') || querySource === 'sdk'
+      const currentAgentId = toolUseContext.agentId
+      const queuedCommandsSnapshot = getCommandsByMaxPriority(
+        sleepRan ? 'later' : 'next',
+      ).filter(cmd => {
+        if (isSlashCommand(cmd)) return false
+        if (isMainThread) return cmd.agentId === undefined
+        // Subagents only drain task-notifications addressed to them — never
+        // user prompts, even if someone stamps an agentId on one.
+        return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId
+      })
+
+      for await (const attachment of getAttachmentMessages(
+        null,
+        updatedToolUseContext,
+        null,
+        queuedCommandsSnapshot,
+        [...messagesForQuery, ...assistantMessages, ...toolResults],
+        querySource,
+      )) {
+        yield attachment
+        toolResults.push(attachment)
+      }
+
+      for (const debugAttachment of consumeOpenAIPrefixDebugAttachments()) {
+        if (debugAttachment.requestShape !== 'responses') continue
+        const msg = createAttachmentMessage({
+          type: 'openai_prefix_debug',
+          model: debugAttachment.model,
+          sharedPrefixItems: debugAttachment.sharedPrefixItems,
+          totalItems: debugAttachment.totalItems,
+          usage: debugAttachment.usage
+            ? {
+                inputTokens: debugAttachment.usage.inputTokens,
+                outputTokens: debugAttachment.usage.outputTokens,
+                cachedTokens: debugAttachment.usage.cachedTokens,
+              }
+            : undefined,
+        })
+        yield msg
+      }
+
+      if (
+        pendingMemoryPrefetch &&
+        pendingMemoryPrefetch.settledAt !== null &&
+        pendingMemoryPrefetch.consumedOnIteration === -1
+      ) {
+        const memoryAttachments = filterDuplicateMemoryAttachments(
+          await pendingMemoryPrefetch.promise,
+          toolUseContext.readFileState,
+        )
+        for (const memAttachment of memoryAttachments) {
+          const msg = createAttachmentMessage(memAttachment)
+          yield msg
+          toolResults.push(msg)
+        }
+        pendingMemoryPrefetch.consumedOnIteration = turnCount - 1
+      }
+
+
+      // Inject prefetched skill discovery. collectSkillDiscoveryPrefetch emits
+      // hidden_by_main_turn — true when the prefetch resolved before this point
+      // (should be >98% at AKI@250ms / Haiku@573ms vs turn durations of 2-30s).
+      if (skillPrefetch && pendingSkillPrefetch) {
+        const skillAttachments =
+          await skillPrefetch.collectSkillDiscoveryPrefetch(pendingSkillPrefetch)
+        for (const att of skillAttachments) {
+          const msg = createAttachmentMessage(att)
+          yield msg
+          toolResults.push(msg)
+        }
+      }
+
+      // Remove only commands that were actually consumed as attachments.
+      // Prompt and task-notification commands are converted to attachments above.
+      const consumedCommands = queuedCommandsSnapshot.filter(
+        cmd => cmd.mode === 'prompt' || cmd.mode === 'task-notification',
+      )
+      if (consumedCommands.length > 0) {
+        for (const cmd of consumedCommands) {
+          if (cmd.uuid) {
+            consumedCommandUuids.push(cmd.uuid)
+            notifyCommandLifecycle(cmd.uuid, 'started')
+          }
+        }
+        removeFromQueue(consumedCommands)
+      }
+
+      // Instrumentation: Track file change attachments after they're added
+      const fileChangeAttachmentCount = count(
+        toolResults,
+        tr =>
+          tr.type === 'attachment' && tr.attachment.type === 'edited_text_file',
+      )
+
+      logEvent('tengu_query_after_attachments', {
+        totalToolResultsCount: toolResults.length,
+        fileChangeAttachmentCount,
+        queryChainId: queryChainIdForAnalytics,
+        queryDepth: queryTracking.depth,
+      })
+
+      // Refresh tools between turns so newly-connected MCP servers become available
+      if (updatedToolUseContext.options.refreshTools) {
+        const refreshedTools = updatedToolUseContext.options.refreshTools()
+        if (refreshedTools !== updatedToolUseContext.options.tools) {
+          updatedToolUseContext = {
+            ...updatedToolUseContext,
+            options: {
+              ...updatedToolUseContext.options,
+              tools: refreshedTools,
+            },
+          }
+        }
+      }
+
+      const toolUseContextWithQueryTracking = {
+        ...updatedToolUseContext,
+        queryTracking,
+      }
+
+      // Each time we have tool results and are about to recurse, that's a turn
+      const nextTurnCount = turnCount + 1
+
+      // Periodic task summary for `claude ps` — fires mid-turn so a
+      // long-running agent still refreshes what it's working on. Gated
+      // only on !agentId so every top-level conversation (REPL, SDK, HFI,
+      // remote) generates summaries; subagents/forks don't.
+      if (feature('BG_SESSIONS')) {
+        if (
+          !toolUseContext.agentId &&
+          taskSummaryModule!.shouldGenerateTaskSummary()
+        ) {
+          taskSummaryModule!.maybeGenerateTaskSummary({
+            systemPrompt,
+            userContext,
+            systemContext,
+            toolUseContext,
+            forkContextMessages: [
+              ...messagesForQuery,
+              ...assistantMessages,
+              ...toolResults,
+            ],
+          })
+        }
+      }
+
+      // Check if we've reached the max turns limit
+      if (maxTurns && nextTurnCount > maxTurns) {
         yield createAttachmentMessage({
           type: 'max_turns_reached',
           maxTurns,
-          turnCount: nextTurnCountOnAbort,
+          turnCount: nextTurnCount,
         })
+        return { reason: 'max_turns', turnCount: nextTurnCount }
       }
-      return { reason: 'aborted_tools' }
-    }
 
-    // If a hook indicated to prevent continuation, stop here
-    if (shouldPreventContinuation) {
-      return { reason: 'hook_stopped' }
-    }
-
-    if (tracking?.compacted) {
-      tracking.turnCounter++
-      logEvent('tengu_post_autocompact_turn', {
-        turnId:
-          tracking.turnId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        turnCounter: tracking.turnCounter,
-
-        queryChainId: queryChainIdForAnalytics,
-        queryDepth: queryTracking.depth,
-      })
-    }
-
-    // Be careful to do this after tool calls are done, because the API
-    // will error if we interleave tool_result messages with regular user messages.
-
-    // Instrumentation: Track message count before attachments
-    logEvent('tengu_query_before_attachments', {
-      messagesForQueryCount: messagesForQuery.length,
-      assistantMessagesCount: assistantMessages.length,
-      toolResultsCount: toolResults.length,
-      queryChainId: queryChainIdForAnalytics,
-      queryDepth: queryTracking.depth,
-    })
-
-    // Get queued commands snapshot before processing attachments.
-    // These will be sent as attachments so Claude can respond to them in the current turn.
-    //
-    // Drain pending notifications. LocalShellTask completions are 'next'
-    // (when MONITOR_TOOL is on) and drain without Sleep. Other task types
-    // (agent/workflow/framework) still default to 'later' — the Sleep flush
-    // covers those. If all task types move to 'next', this branch could go.
-    //
-    // Slash commands are excluded from mid-turn drain — they must go through
-    // processSlashCommand after the turn ends (via useQueueProcessor), not be
-    // sent to the model as text. Bash-mode commands are already excluded by
-    // INLINE_NOTIFICATION_MODES in getQueuedCommandAttachments.
-    //
-    // Agent scoping: the queue is a process-global singleton shared by the
-    // coordinator and all in-process subagents. Each loop drains only what's
-    // addressed to it — main thread drains agentId===undefined, subagents
-    // drain their own agentId. User prompts (mode:'prompt') still go to main
-    // only; subagents never see the prompt stream.
-    // eslint-disable-next-line custom-rules/require-tool-match-name -- ToolUseBlock.name has no aliases
-    const sleepRan = toolUseBlocks.some(b => b.name === SLEEP_TOOL_NAME)
-    const isMainThread =
-      querySource.startsWith('repl_main_thread') || querySource === 'sdk'
-    const currentAgentId = toolUseContext.agentId
-    const queuedCommandsSnapshot = getCommandsByMaxPriority(
-      sleepRan ? 'later' : 'next',
-    ).filter(cmd => {
-      if (isSlashCommand(cmd)) return false
-      if (isMainThread) return cmd.agentId === undefined
-      // Subagents only drain task-notifications addressed to them — never
-      // user prompts, even if someone stamps an agentId on one.
-      return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId
-    })
-
-    for await (const attachment of getAttachmentMessages(
-      null,
-      updatedToolUseContext,
-      null,
-      queuedCommandsSnapshot,
-      [...messagesForQuery, ...assistantMessages, ...toolResults],
-      querySource,
-    )) {
-      yield attachment
-      toolResults.push(attachment)
-    }
-
-    for (const debugAttachment of consumeOpenAIPrefixDebugAttachments()) {
-      if (debugAttachment.requestShape !== 'responses') continue
-      const msg = createAttachmentMessage({
-        type: 'openai_prefix_debug',
-        model: debugAttachment.model,
-        sharedPrefixItems: debugAttachment.sharedPrefixItems,
-        totalItems: debugAttachment.totalItems,
-        usage: debugAttachment.usage
-          ? {
-              inputTokens: debugAttachment.usage.inputTokens,
-              outputTokens: debugAttachment.usage.outputTokens,
-              cachedTokens: debugAttachment.usage.cachedTokens,
-            }
-          : undefined,
-      })
-      yield msg
-    }
-
-    // Memory prefetch consume: only if settled and not already consumed on
-    // an earlier iteration. If not settled yet, skip (zero-wait) and retry
-    // next iteration — the prefetch gets as many chances as there are loop
-    // iterations before the turn ends. readFileState (cumulative across
-    // iterations) filters out memories the model already Read/Wrote/Edited
-    // — including in earlier iterations, which the per-iteration
-    // toolUseBlocks array would miss.
-    if (
-      pendingMemoryPrefetch &&
-      pendingMemoryPrefetch.settledAt !== null &&
-      pendingMemoryPrefetch.consumedOnIteration === -1
-    ) {
-      const memoryAttachments = filterDuplicateMemoryAttachments(
-        await pendingMemoryPrefetch.promise,
-        toolUseContext.readFileState,
-      )
-      for (const memAttachment of memoryAttachments) {
-        const msg = createAttachmentMessage(memAttachment)
-        yield msg
-        toolResults.push(msg)
-      }
-      pendingMemoryPrefetch.consumedOnIteration = turnCount - 1
-    }
-
-
-    // Inject prefetched skill discovery. collectSkillDiscoveryPrefetch emits
-    // hidden_by_main_turn — true when the prefetch resolved before this point
-    // (should be >98% at AKI@250ms / Haiku@573ms vs turn durations of 2-30s).
-    if (skillPrefetch && pendingSkillPrefetch) {
-      const skillAttachments =
-        await skillPrefetch.collectSkillDiscoveryPrefetch(pendingSkillPrefetch)
-      for (const att of skillAttachments) {
-        const msg = createAttachmentMessage(att)
-        yield msg
-        toolResults.push(msg)
-      }
-    }
-
-    // Remove only commands that were actually consumed as attachments.
-    // Prompt and task-notification commands are converted to attachments above.
-    const consumedCommands = queuedCommandsSnapshot.filter(
-      cmd => cmd.mode === 'prompt' || cmd.mode === 'task-notification',
-    )
-    if (consumedCommands.length > 0) {
-      for (const cmd of consumedCommands) {
-        if (cmd.uuid) {
-          consumedCommandUuids.push(cmd.uuid)
-          notifyCommandLifecycle(cmd.uuid, 'started')
-        }
-      }
-      removeFromQueue(consumedCommands)
-    }
-
-    // Instrumentation: Track file change attachments after they're added
-    const fileChangeAttachmentCount = count(
-      toolResults,
-      tr =>
-        tr.type === 'attachment' && tr.attachment.type === 'edited_text_file',
-    )
-
-    logEvent('tengu_query_after_attachments', {
-      totalToolResultsCount: toolResults.length,
-      fileChangeAttachmentCount,
-      queryChainId: queryChainIdForAnalytics,
-      queryDepth: queryTracking.depth,
-    })
-
-    // Refresh tools between turns so newly-connected MCP servers become available
-    if (updatedToolUseContext.options.refreshTools) {
-      const refreshedTools = updatedToolUseContext.options.refreshTools()
-      if (refreshedTools !== updatedToolUseContext.options.tools) {
-        updatedToolUseContext = {
-          ...updatedToolUseContext,
-          options: {
-            ...updatedToolUseContext.options,
-            tools: refreshedTools,
-          },
-        }
-      }
-    }
-
-    const toolUseContextWithQueryTracking = {
-      ...updatedToolUseContext,
-      queryTracking,
-    }
-
-    // Each time we have tool results and are about to recurse, that's a turn
-    const nextTurnCount = turnCount + 1
-
-    // Periodic task summary for `claude ps` — fires mid-turn so a
-    // long-running agent still refreshes what it's working on. Gated
-    // only on !agentId so every top-level conversation (REPL, SDK, HFI,
-    // remote) generates summaries; subagents/forks don't.
-    if (feature('BG_SESSIONS')) {
-      if (
-        !toolUseContext.agentId &&
-        taskSummaryModule!.shouldGenerateTaskSummary()
-      ) {
-        taskSummaryModule!.maybeGenerateTaskSummary({
-          systemPrompt,
-          userContext,
-          systemContext,
-          toolUseContext,
-          forkContextMessages: [
-            ...messagesForQuery,
-            ...assistantMessages,
-            ...toolResults,
-          ],
-        })
-      }
-    }
-
-    // Check if we've reached the max turns limit
-    if (maxTurns && nextTurnCount > maxTurns) {
-      yield createAttachmentMessage({
-        type: 'max_turns_reached',
-        maxTurns,
+      queryCheckpoint('query_recursive_call')
+      const next: State = {
+        messages: [...messagesForQuery, ...assistantMessages, ...toolResults],
+        toolUseContext: toolUseContextWithQueryTracking,
+        autoCompactTracking: tracking,
         turnCount: nextTurnCount,
-      })
-      return { reason: 'max_turns', turnCount: nextTurnCount }
+        maxOutputTokensRecoveryCount: 0,
+        hasAttemptedReactiveCompact: false,
+        pendingToolUseSummary: nextPendingToolUseSummary,
+        maxOutputTokensOverride: undefined,
+        stopHookActive,
+        transition: { reason: 'next_turn' },
+      }
+      state = next
+      continue
     }
 
-    queryCheckpoint('query_recursive_call')
-    const next: State = {
-      messages: [...messagesForQuery, ...assistantMessages, ...toolResults],
-      toolUseContext: toolUseContextWithQueryTracking,
-      autoCompactTracking: tracking,
-      turnCount: nextTurnCount,
-      maxOutputTokensRecoveryCount: 0,
-      hasAttemptedReactiveCompact: false,
-      pendingToolUseSummary: nextPendingToolUseSummary,
-      maxOutputTokensOverride: undefined,
-      stopHookActive,
-      transition: { reason: 'next_turn' },
-    }
-    state = next
-  } // while (true)
+  }
 }

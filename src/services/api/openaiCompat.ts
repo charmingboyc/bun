@@ -13,6 +13,7 @@ import { logEvent } from '../analytics/index.js'
 import { splitSysPromptPrefix } from '../../utils/api.js'
 import { getOpenAIReasoningConfig } from '../../utils/modelReasoning.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
+import { ensureToolResultPairing } from '../../utils/messages.js'
 import {
   enableAllGitHubCopilotModels,
   getGitHubCopilotBaseUrl,
@@ -972,6 +973,33 @@ function getCodexToolDefinitions(tools?: BetaToolUnion[]): OpenAICodexRequest['t
   return mapped.length > 0 ? mapped : undefined
 }
 
+function stripAnthropicSignatureBlocks(
+  messages: BetaMessageParam[],
+): BetaMessageParam[] {
+  let changed = false
+  const result = messages.map(message => {
+    if (message.role !== 'assistant' || !Array.isArray(message.content)) {
+      return message
+    }
+
+    const filtered = message.content.filter(block => {
+      if (!block || typeof block !== 'object') return true
+      const type = 'type' in block ? block.type : undefined
+      return (
+        type !== 'thinking' &&
+        type !== 'redacted_thinking' &&
+        type !== 'connector_text'
+      )
+    })
+
+    if (filtered.length === message.content.length) return message
+    changed = true
+    return { ...message, content: filtered }
+  })
+
+  return changed ? result : messages
+}
+
 export function convertAnthropicRequestToOpenAI(input: {
   model: string
   system?: string | Array<{ type?: string; text?: string }>
@@ -985,6 +1013,8 @@ export function convertAnthropicRequestToOpenAI(input: {
   const targetModel = configuredModel || input.model
   const reasoning = getActiveReasoningConfig(targetModel)
   const messages: OpenAIChatMessage[] = []
+  const sanitizedMessages = stripAnthropicSignatureBlocks(input.messages)
+  const pairedMessages = ensureToolResultPairing(sanitizedMessages)
   const { instructions, dynamicInstructions } = splitOpenAISystemPrompt(
     input.system,
   )
@@ -994,7 +1024,7 @@ export function convertAnthropicRequestToOpenAI(input: {
     messages.push({ role: 'system', content: instructions })
   }
 
-  for (const message of input.messages) {
+  for (const message of pairedMessages) {
     if (message.role === 'user') {
       const blocks = toBlocks(message.content)
 
@@ -1098,9 +1128,11 @@ export function convertAnthropicRequestToOpenAICodex(input: {
     input.system,
   )
   const codexInput: OpenAICodexInputItem[] = []
+  const sanitizedMessages = stripAnthropicSignatureBlocks(input.messages)
+  const pairedMessages = ensureToolResultPairing(sanitizedMessages)
   const toolDefinitions = getCodexToolDefinitions(input.tools)
 
-  for (const message of input.messages) {
+  for (const message of pairedMessages) {
     if (message.role === 'user') {
       const blocks = toBlocks(message.content)
       let pendingUserContent: OpenAIUserInputPart[] = []
@@ -1261,9 +1293,11 @@ export function convertAnthropicRequestToOpenAIResponses(input: {
     input.system,
   )
   const responseInput: OpenAIResponsesInputItem[] = []
+  const sanitizedMessages = stripAnthropicSignatureBlocks(input.messages)
+  const pairedMessages = ensureToolResultPairing(sanitizedMessages)
   const toolDefinitions = getResponsesToolDefinitions(input.tools)
 
-  for (const message of input.messages) {
+  for (const message of pairedMessages) {
     if (message.role === 'user') {
       const blocks = toBlocks(message.content)
       let pendingUserContent: OpenAIUserInputPart[] = []

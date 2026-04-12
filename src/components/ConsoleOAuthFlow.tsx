@@ -418,7 +418,7 @@ function parseManualOAuthInput(value: string): {
   return { authorizationCode, state };
 }
 
-const PASTE_HERE_MSG = 'Paste code here if prompted > ';
+const PASTE_HERE_MSG = 'Paste full link from browser here > ';
 export function ConsoleOAuthFlow({
   onDone,
   startingMessage,
@@ -1251,7 +1251,7 @@ export function ConsoleOAuthFlow({
       if (!parsedInput) {
         setOAuthStatus({
           state: 'error',
-          message: 'Invalid code. Paste the full callback URL or code#state.',
+          message: 'Invalid input. Paste the full link from the browser exactly as-is — usually the localhost callback URL — or paste code#state.',
           toRetry: {
             state: 'waiting_for_login',
             url
@@ -2206,18 +2206,23 @@ function OAuthStatusMessage({
           ) : null}
           {oauthStatus.instructions ? <Text color="warning">{oauthStatus.instructions}</Text> : null}
           {showPastePrompt && !oauthStatus.instructions ? (
-            <Box>
-              <Text>{PASTE_HERE_MSG}</Text>
-              <TextInput
-                value={pastedCode}
-                onChange={setPastedCode}
-                onSubmit={value => handleSubmitCode(value, oauthStatus.url)}
-                cursorOffset={cursorOffset}
-                onChangeCursorOffset={setCursorOffset}
-                columns={textInputColumns}
-                mask="*"
-              />
-            </Box>
+            <>
+              <Box>
+                <Text>{PASTE_HERE_MSG}</Text>
+                <TextInput
+                  value={pastedCode}
+                  onChange={setPastedCode}
+                  onSubmit={value => handleSubmitCode(value, oauthStatus.url)}
+                  cursorOffset={cursorOffset}
+                  onChangeCursorOffset={setCursorOffset}
+                  columns={textInputColumns}
+                  mask="*"
+                />
+              </Box>
+              <Text dimColor>
+                Paste the full link from the browser exactly as-is — usually the localhost callback URL — even if the page cannot be reached.
+              </Text>
+            </>
           ) : null}
         </Box>
       );
