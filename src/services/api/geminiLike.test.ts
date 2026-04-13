@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  convertAnthropicRequestToGemini,
   createGeminiVertexStream,
   fetchGeminiVertexResponse,
 } from './geminiLike.js'
@@ -14,7 +15,7 @@ describe('Gemini AI Studio URL joining', () => {
       baseURL: 'https://generativelanguage.googleapis.com/v1beta',
       model: 'gemini-flash-latest',
       request: { contents: [] },
-      fetch: async (input, init) => {
+      fetch: async input => {
         requestedUrl = String(input)
         return new Response('data: {}\n\n', {
           status: 200,
@@ -57,5 +58,31 @@ describe('Gemini AI Studio URL joining', () => {
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
     )
     expect(response).toEqual({ candidates: [] })
+  })
+})
+
+describe('Gemini tool call thought signature forwarding', () => {
+  test('forwards tool_use signature into functionCall thoughtSignature', () => {
+    const request = convertAnthropicRequestToGemini({
+      model: 'gemini-2.5-pro',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'default_api:EnterPlanMode',
+              input: {},
+              signature: 'sig_abc123',
+            } as any,
+          ],
+        } as any,
+      ],
+    })
+
+    const part = request.contents?.[0]?.parts?.[0]
+    expect(part?.functionCall?.name).toBe('default_api:EnterPlanMode')
+    expect(part?.thoughtSignature).toBe('sig_abc123')
   })
 })

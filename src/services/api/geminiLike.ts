@@ -402,6 +402,8 @@ export function convertAnthropicRequestToGemini(input: {
         if (block.type === 'tool_use') {
           const toolName = typeof block.name === 'string' ? block.name : ''
           const toolUseId = typeof block.id === 'string' ? block.id : undefined
+          const thoughtSignature =
+            typeof block.signature === 'string' ? block.signature : ''
           if (toolUseId && toolName) {
             toolNameByUseId.set(toolUseId, toolName)
           }
@@ -414,6 +416,7 @@ export function convertAnthropicRequestToGemini(input: {
                   : {},
               id: toolUseId,
             },
+            thoughtSignature,
           })
         }
       }
@@ -553,6 +556,29 @@ function joinBaseUrl(baseURL: string, path: string): string {
   }
 }
 
+function buildGeminiVertexBaseUrl(baseURL: string): string {
+  const normalizedBaseURL = baseURL.trim().replace(/\/+$/, '')
+  if (!normalizedBaseURL) {
+    return normalizedBaseURL
+  }
+
+  try {
+    const parsed = new URL(normalizedBaseURL)
+    const normalizedPathname = parsed.pathname.replace(/\/+$/, '')
+    if (/\/v\d+[a-z0-9-]*(?:\/|$)/i.test(normalizedPathname)) {
+      return normalizedBaseURL
+    }
+  } catch {
+    return normalizedBaseURL
+  }
+
+  return `${normalizedBaseURL}/v1beta`
+}
+
+function buildGeminiVertexEndpoint(baseURL: string, path: string): string {
+  return joinBaseUrl(buildGeminiVertexBaseUrl(baseURL), path)
+}
+
 function extractRetryDelay(errorText: string, response?: Response | Headers): number | undefined {
   const headers = response instanceof Headers ? response : response?.headers
   const retryAfter = headers?.get('retry-after')
@@ -603,7 +629,7 @@ export async function createGeminiVertexStream(input: {
   signal?: AbortSignal
 }): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const response = await (input.fetch ?? globalThis.fetch)(
-    joinBaseUrl(
+    buildGeminiVertexEndpoint(
       input.baseURL,
       `/models/${encodeURIComponent(input.model)}:streamGenerateContent?alt=sse`,
     ),
@@ -645,7 +671,7 @@ export async function fetchGeminiVertexResponse(input: {
   signal?: AbortSignal
 }): Promise<unknown> {
   const response = await (input.fetch ?? globalThis.fetch)(
-    joinBaseUrl(
+    buildGeminiVertexEndpoint(
       input.baseURL,
       `/models/${encodeURIComponent(input.model)}:generateContent`,
     ),

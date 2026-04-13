@@ -197,6 +197,19 @@ function getPresetBaseURLForVariant(variant: ProviderVariant | undefined): strin
   }
 }
 
+function hasVersionPathSegment(baseURL: string | undefined): boolean {
+  if (!baseURL?.trim()) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(baseURL.trim());
+    return /\/v\d+[a-z0-9-]*(?:\/|$)/i.test(parsed.pathname.replace(/\/+$/, ''));
+  } catch {
+    return /\/v\d+[a-z0-9-]*(?:\/|$)/i.test(baseURL.trim().replace(/\/+$/, ''));
+  }
+}
+
 function getDefaultModelsForVariant(variant: ProviderVariant | undefined): string[] {
   switch (variant) {
     case 'gemini-cli-oauth':
@@ -1953,7 +1966,9 @@ function OAuthStatusMessage({
       }
 
       const routeSuffix = oauthStatus.provider === 'gemini-like'
-        ? '/v1beta/models/{model}:streamGenerateContent'
+        ? hasVersionPathSegment(customBaseURL)
+          ? '/models/{model}:streamGenerateContent'
+          : '/v1beta/models/{model}:streamGenerateContent'
         : oauthStatus.authMode === 'responses'
           ? '/v1/responses'
           : oauthStatus.provider === 'openai-like'
@@ -2002,7 +2017,7 @@ function OAuthStatusMessage({
           ? oauthStatus.provider === 'openai-like'
             ? 'http(s)://your-openai-compatible-endpoint.example.com'
             : oauthStatus.provider === 'gemini-like'
-              ? GEMINI_AI_STUDIO_BASE_URL
+              ? 'https://generativelanguage.googleapis.com'
               : 'http(s)://your-anthropic-compatible-endpoint.example.com'
           : oauthStatus.step === 'apiKey'
             ? 'sk-...'
@@ -2080,13 +2095,17 @@ function OAuthStatusMessage({
             {oauthStatus.step === 'baseURL' && !isOfficial && !isCopilotSetup ? <Text dimColor>{routeSuffix}</Text> : null}
           </Box>
           <Text dimColor>
-            {oauthStatus.step === 'models'
-              ? 'Press Enter to save the models.'
-              : isCopilotSetup
-                ? 'Leave blank for github.com. Press Enter to continue.'
-                : oauthStatus.step === 'apiKey'
-                  ? 'Press Enter to continue.'
-                  : 'Press Enter to save and continue.'}
+            {oauthStatus.step === 'baseURL' && oauthStatus.provider === 'gemini-like'
+              ? hasVersionPathSegment(value)
+                ? 'Base URL already includes a version segment. Press Enter to save and continue.'
+                : 'If omitted, /v1beta is added automatically — do not enter it twice. Press Enter to save and continue.'
+              : oauthStatus.step === 'models'
+                ? 'Press Enter to save the models.'
+                : isCopilotSetup
+                  ? 'Leave blank for github.com. Press Enter to continue.'
+                  : oauthStatus.step === 'apiKey'
+                    ? 'Press Enter to continue.'
+                    : 'Press Enter to save and continue.'}
           </Text>
         </Box>
       );
