@@ -79,28 +79,36 @@ function getConfiguredModelOptions(): ConfiguredModelOption[] {
   const activeProviderId = storage.activeProvider ?? storage.providerId;
   const providers = storage.providers ?? [];
   return providers.flatMap(provider => {
-    const providerLabel = provider.kind === 'openai-like'
-      ? 'OpenAI-compatible'
-      : provider.kind === 'gemini-like'
-        ? 'Gemini-compatible'
-        : 'Anthropic-compatible';
-    const authLabel = provider.authMode === 'api-key'
+    const providerLabel = provider.variant === 'gemini-ai-studio'
+      ? 'Google AI Studio'
+      : provider.variant === 'gemini-antigravity-oauth'
+        ? 'Antigravity'
+        : provider.kind === 'openai-like'
+          ? 'OpenAI-compatible'
+          : provider.kind === 'gemini-like'
+            ? 'Gemini-compatible'
+            : 'Anthropic-compatible';
+    const authLabel = provider.variant === 'gemini-ai-studio'
       ? 'API key'
-      : provider.authMode === 'chat-completions'
-        ? 'chat-completions'
-        : provider.authMode === 'responses'
-          ? 'responses'
-          : provider.authMode === 'oauth'
-            ? 'OAuth'
-            : provider.authMode === 'vertex-compatible'
-              ? 'Vertex-compatible'
-              : provider.authMode === 'gemini-cli-oauth'
-                ? 'Gemini CLI OAuth'
-                : provider.kind === 'openai-like'
-                  ? 'chat-completions'
-                  : provider.kind === 'gemini-like'
-                    ? 'Vertex-compatible'
-                    : 'API key';
+      : provider.variant === 'gemini-antigravity-oauth'
+        ? 'OAuth'
+        : provider.authMode === 'api-key'
+          ? 'API key'
+          : provider.authMode === 'chat-completions'
+            ? 'chat-completions'
+            : provider.authMode === 'responses'
+              ? 'responses'
+              : provider.authMode === 'oauth'
+                ? 'OAuth'
+                : provider.authMode === 'vertex-compatible'
+                  ? 'Vertex-compatible'
+                  : provider.authMode === 'gemini-cli-oauth'
+                    ? 'Gemini CLI OAuth'
+                    : provider.kind === 'openai-like'
+                      ? 'chat-completions'
+                      : provider.kind === 'gemini-like'
+                        ? 'Vertex-compatible'
+                        : 'API key';
     const accountName = provider.id || extractAccountName(provider.baseURL, provider.kind);
     return provider.models.map(model => ({
       value: makeConfiguredOptionValue(provider.kind, provider.id, provider.baseURL, provider.authMode, model),

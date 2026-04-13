@@ -22,8 +22,8 @@
 更新于 **2026 年 4 月 13 日**
 
 - ⭐ **`/login` 登录体系重写**：新增账号管理、Provider 分组、官方/自定义子菜单、分步配置与 OAuth 回填，整个登录链路从一次性录入升级为可持续管理的闭环。
-- ⭐ **正式支持 GitHub Copilot OAuth**：已实测 `gpt-5-mini`、`claude-haiku-4.5`、`gemini-3-flash-preview`，并补齐 OpenAI OAuth、Gemini CLI OAuth、Antigravity OAuth 等官方线路。
-- ⭐ **官方 / OAuth 线路支持自动写入模型列表**：OpenAI Official / OAuth、Gemini AI Studio / Gemini CLI OAuth、Antigravity OAuth、GitHub Copilot OAuth 登录完成后即可在 `/model` 直接切换。
+- ⭐ **正式支持 GitHub Copilot OAuth**：已实测 `gpt-5-mini`、`claude-haiku-4.5`、`gemini-3-flash-preview`，并补齐 OpenAI OAuth、Google AI Studio、Google Antigravity (OAuth) 等官方线路。
+- ⭐ **官方 / OAuth 线路支持自动写入模型列表**：OpenAI Official / OAuth、Google AI Studio、Google Antigravity (OAuth)、GitHub Copilot OAuth 登录完成后即可在 `/model` 直接切换。
 
 更多历史更新与细节说明请跳转查看：[详细更新日志](#详细更新日志)
 
@@ -65,7 +65,7 @@
 
 本项目提供两条关键命令来完成鉴权与模型管理：
 
-> 提示：相较云端 `main`，当前仓库已经额外支持 `GitHub Copilot OAuth`、`Antigravity OAuth` 与新版 `/login` 多级菜单流程；如果你此前只看过 `main` 版文档，以下内容以当前仓库实现为准。
+> 提示：相较云端 `main`，当前仓库已经额外支持 `GitHub Copilot OAuth`、`Google Antigravity (OAuth)`、`Google AI Studio (API key)` 与新版 `/login` 多级菜单流程；如果你此前只看过 `main` 版文档，以下内容以当前仓库实现为准。
 
 ### 1\. `/login` — 新版多级登录入口
 
@@ -105,31 +105,32 @@
 
 - `Claude`：官方 Anthropic 登录
 - `OpenAI →`：进入 OpenAI 子菜单
-- `Google Gemini →`：进入 Gemini 子菜单
-- `Antigravity`：官方 OAuth
+- `Google Gemini`：直达 Google AI Studio API key 配置
+- `Antigravity`：Google Antigravity (OAuth)
 - `GitHub Copilot OAuth`：官方 OAuth
 - `Custom →`：手动配置兼容接口
 
 #### 子菜单 4：`Provider variant select`
 
-不同分组会展开不同子菜单：
+当前只有以下分组会展开子菜单：
 
 - `OpenAI →`
   - `Official Responses API`
   - `OAuth`
-- `Google Gemini →`
-  - `Gemini CLI OAuth`
-  - `Google AI Studio API key`
 - `Custom →`
   - `Anthropic-Like`
   - `OpenAI-Like`
   - `Google-Vertex-Like`
 
+`Google Gemini` 不再进入子菜单，而是直接打开 `Google AI Studio (API key)` 输入页。
+
+> 说明：`Gemini CLI OAuth` 新建入口已删除，因为这条线路对新账号几乎必然触发封号或严重限流；已保存的 legacy 账号仅保留兼容，不再推荐新增。
+
 #### 子菜单 5：`Configure official provider` / `Configure custom provider`
 
 选定线路后，会进入分步配置阶段，不同线路的输入步骤不同：
 
-- **Claude Official / OpenAI OAuth / Gemini CLI OAuth / Antigravity OAuth**
+- **Claude Official / OpenAI OAuth / Google Antigravity (OAuth)**
   - 直接进入浏览器 OAuth 流程
 - **GitHub Copilot OAuth**
   - 先输入可选的 `GitHub Enterprise domain`
@@ -137,8 +138,8 @@
 - **OpenAI Official Responses API**
   - 输入 OpenAI API Key
   - CLI 会自动拉取官方模型列表并保存
-- **Google Gemini AI Studio**
-  - 输入 API Key
+- **Google Gemini / Google AI Studio (API key)**
+  - 直接输入 API Key
   - CLI 会自动拉取支持 `generateContent` 的模型列表并保存
 - **OpenAI-Like**
   - 先选择 `chat/completions` 或 `Responses API`
@@ -251,7 +252,7 @@
 
 ### 3\. Gemini 兼容网关
 
-适用于提供 **Gemini 风格接口** 或 Gemini CLI OAuth 路径的服务。
+适用于提供 **Gemini 风格接口** 或 Google AI Studio `generateContent` 路径的服务。
 
 **已验证模型：**
 
@@ -290,14 +291,15 @@
 
 - **OpenAI Official Responses API**：保存 API Key 后自动拉取官方模型列表
 - **OpenAI OAuth**：登录成功后自动写入可用模型列表
-- **Google Gemini AI Studio**：保存 API Key 后自动拉取支持 `generateContent` 的模型列表
-- **Gemini CLI OAuth / Antigravity OAuth / GitHub Copilot OAuth**：登录成功后自动写入对应线路的模型列表
+- **Google AI Studio (API key)**：保存 API Key 后自动拉取支持 `generateContent` 的模型列表
+- **Google Antigravity (OAuth) / GitHub Copilot OAuth**：登录成功后自动写入对应线路的模型列表
+- **Legacy Gemini CLI OAuth**：仅保留兼容，不再提供新增入口，因为这条线路对新账号极易触发封号或限流
 
 `cloaiCode` 已经把这些关键接入链路统一收敛到同一套 CLI 交互之中：
 
 - **Anthropic 兼容网关接入第三方模型**
 - **OpenAI 兼容网关与官方 OAuth / Responses 路径**
-- **Gemini 兼容网关与官方 OAuth / AI Studio 路径**
+- **Gemini 兼容网关与 Google AI Studio / Google Antigravity 路径**
 - **GitHub Copilot OAuth**
 
 -----
@@ -570,7 +572,7 @@ bun link @cloai-code/cli
 - **适用场景**：Anthropic-compatible、OpenAI-compatible、Google-Vertex-Like 等自定义兼容接口。
 - **官方 API Key 线路**：
   - `OpenAI Official Responses API`
-  - `Google Gemini AI Studio`
+  - `Google AI Studio (API key)`
 - **特点**：适合服务器、容器、远程终端等纯无头环境，稳定、易排障、易自动化。
 - **新版补强**：官方 API Key 线路保存成功后，会自动拉取并写入模型列表，而不是要求用户手工补 `savedModels`。
 
@@ -580,8 +582,7 @@ bun link @cloai-code/cli
 
 - `Claude Official`
 - `OpenAI OAuth`
-- `Gemini CLI OAuth`
-- `Antigravity OAuth`
+- `Google Antigravity (OAuth)`
 - `GitHub Copilot OAuth`
 
 **特点：**
@@ -589,6 +590,7 @@ bun link @cloai-code/cli
 - CLI 会自动尝试打开浏览器完成授权。
 - 在无法自动回调时，可手动粘贴完整回调 URL，或直接粘贴 `code#state`。
 - `GitHub Copilot OAuth` 支持可选的 `GitHub Enterprise domain`，并使用 device flow / browser flow 完成授权。
+- `/login -> Google Gemini -> Gemini CLI OAuth` 新建入口已删除，因为这条线路对新账号几乎必然触发封号或严重限流；已保存的 legacy 账号仅保留兼容。
 
 ### 3\. Provider 级独立鉴权沙盒
 
@@ -641,10 +643,15 @@ bun link @cloai-code/cli
 
 - `Claude`
 - `OpenAI →`
-- `Google Gemini →`
+- `Google Gemini`
 - `Antigravity`
 - `GitHub Copilot OAuth`
 - `Custom →`
+
+其中：
+
+- `Google Gemini` 会直接进入 `Google AI Studio (API key)` 输入页，不再显示 Gemini 子菜单。
+- `Antigravity` 对应 Google Antigravity (OAuth)。
 
 ### 4\. `OpenAI →` 子菜单
 
@@ -659,18 +666,15 @@ bun link @cloai-code/cli
 - **Official Responses API**：官方 API Key 线路，固定 `api.openai.com`，保存 Key 后自动拉取模型列表。
 - **OAuth**：官方浏览器授权线路，完成登录后自动写入可用模型列表。
 
-### 5\. `Google Gemini →` 子菜单
+### 5\. `Google Gemini`
 
-进入 `Google Gemini →` 后，可选：
+选择 `Google Gemini` 后，CLI 会直接进入 `Google AI Studio (API key)` 页面：
 
-- `Gemini CLI OAuth`
-- `Google Cloud API`
-- `← Back`
+- 输入 API Key
+- 自动拉取支持 `generateContent` 的模型列表
+- 保存后可直接在 `/model` 中切换
 
-对应含义：
-
-- **Gemini CLI OAuth**：官方浏览器授权线路。
-- **Google Cloud API`**（界面文案）/ **Google Gemini AI Studio**（保存后的 Provider 类型）：API Key 线路，保存 Key 后自动拉取支持 `generateContent` 的模型列表。
+> `Gemini CLI OAuth` 新建入口已删除，因为这条线路对新账号几乎必然触发封号或严重限流；已保存的 legacy 账号仅保留兼容，不再推荐新增。
 
 ### 6\. `Custom →` 子菜单
 
@@ -805,7 +809,8 @@ cloai
 
 - 对照云端 `main`，重写 `/login` 登录文档：补齐 `Manage accounts`、`Provider actions`、`Select provider`、`Provider variant select`、`Configure official provider`、`Configure custom provider`、`Ready to start`、`Waiting for login` 等新版子菜单与状态流转说明。
 - 正式加入 `GitHub Copilot OAuth`：支持 `github.com` 与可选 `GitHub Enterprise domain`，登录完成后自动启用并写入 Copilot 模型列表；已实测 `gpt-5-mini`、`claude-haiku-4.5`、`gemini-3-flash-preview`。
-- `OpenAI Official Responses API`、`OpenAI OAuth`、`Google Gemini AI Studio`、`Gemini CLI OAuth`、`Antigravity OAuth`、`GitHub Copilot OAuth` 现已统一支持模型列表自动回填，登录成功后可直接在 `/model` 中选择。
+- `OpenAI Official Responses API`、`OpenAI OAuth`、`Google AI Studio (API key)`、`Google Antigravity (OAuth)`、`GitHub Copilot OAuth` 现已统一支持模型列表自动回填，登录成功后可直接在 `/model` 中选择。
+- 移除 `/login -> Google Gemini -> Gemini CLI OAuth` 新建入口，改为 `Google Gemini` 直达 `Google AI Studio (API key)`；原因是该线路对新账号极易触发封号或限流，已保存 legacy 账号仅保留兼容。
 - `/model` 文档同步更新为新版行为：支持读取已保存 Provider 记录，以“模型名 + 账号 / Provider 名称”的形式展示同名模型的不同来源。
 
 ### 2026 年 4 月 9 日更新

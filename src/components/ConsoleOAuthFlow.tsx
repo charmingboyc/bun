@@ -62,7 +62,7 @@ type ProviderSelectionGroup = 'openai' | 'gemini' | 'custom';
 type ProviderRootOption =
   | 'claude-official'
   | 'openai-group'
-  | 'gemini-group'
+  | 'gemini-ai-studio'
   | 'gemini-antigravity-oauth'
   | 'github-copilot-oauth'
   | 'custom-group';
@@ -257,7 +257,7 @@ function buildProviderDisplayName(provider: Pick<ProviderConfig, 'kind' | 'authM
     case 'gemini-cli-oauth':
       return 'Google Gemini CLI OAuth';
     case 'gemini-ai-studio':
-      return 'Google Gemini AI Studio';
+      return 'Google AI Studio';
     case 'gemini-antigravity-oauth':
       return 'Antigravity';
     case 'github-copilot-oauth':
@@ -278,7 +278,7 @@ function buildProviderTypeLabel(provider: Pick<ProviderConfig, 'kind' | 'authMod
     case 'gemini-cli-oauth':
       return 'Official Gemini CLI OAuth';
     case 'gemini-ai-studio':
-      return 'Official Gemini AI Studio';
+      return 'Official Google AI Studio';
     case 'gemini-antigravity-oauth':
       return 'Official Antigravity OAuth';
     case 'github-copilot-oauth':
@@ -1167,7 +1167,7 @@ export function ConsoleOAuthFlow({
           setCustomModels(fetchedModels.join(' '));
           setOAuthStatus({ state: 'success' });
           void sendNotification({
-            message: 'Google Gemini AI Studio API key saved',
+            message: 'Google AI Studio API key saved',
             notificationType: 'auth_success',
           }, terminal);
           return;
@@ -1225,7 +1225,7 @@ export function ConsoleOAuthFlow({
           variant === 'openai-official-responses'
             ? 'OpenAI official endpoint saved'
             : variant === 'gemini-ai-studio'
-              ? 'Google Gemini AI Studio endpoint saved'
+              ? 'Google AI Studio endpoint saved'
               : safeOauthStatus.provider === 'openai-like'
                 ? `OpenAI-compatible ${safeOauthStatus.authMode} endpoint saved`
                 : safeOauthStatus.provider === 'gemini-like'
@@ -1783,8 +1783,8 @@ function OAuthStatusMessage({
                   value: 'openai-group'
                 },
                 {
-                  label: <Text>Google Gemini → <Text dimColor>Gemini CLI OAuth or AI Studio API key</Text></Text>,
-                  value: 'gemini-group'
+                  label: <Text>Google Gemini <Text dimColor>Google AI Studio API key</Text></Text>,
+                  value: 'gemini-ai-studio'
                 },
                 {
                   label: <Text>Antigravity <Text dimColor>Official OAuth</Text></Text>,
@@ -1806,10 +1806,6 @@ function OAuthStatusMessage({
                 }
                 if (value === 'openai-group') {
                   setOAuthStatus({ state: 'provider_variant_select', group: 'openai' });
-                  return;
-                }
-                if (value === 'gemini-group') {
-                  setOAuthStatus({ state: 'provider_variant_select', group: 'gemini' });
                   return;
                 }
                 if (value === 'custom-group') {
@@ -1842,11 +1838,7 @@ function OAuthStatusMessage({
         : oauthStatus.group === 'gemini'
           ? [
               {
-                label: <Text>Gemini CLI OAuth <Text dimColor>Official browser login</Text></Text>,
-                value: 'gemini-cli-oauth'
-              },
-              {
-                label: <Text>Google Cloud API <Text dimColor>AI Studio API key</Text></Text>,
+                label: <Text>Google AI Studio API key <Text dimColor>Preset generativelanguage.googleapis.com</Text></Text>,
                 value: 'gemini-ai-studio'
               },
               {
@@ -1916,7 +1908,7 @@ function OAuthStatusMessage({
               : variant === 'gemini-cli-oauth'
                 ? 'Google Gemini CLI OAuth'
                 : variant === 'gemini-ai-studio'
-                  ? 'Google Gemini AI Studio'
+                  ? 'Google AI Studio'
                   : variant === 'gemini-antigravity-oauth'
                     ? 'Antigravity'
                     : variant === 'github-copilot-oauth'
@@ -1974,7 +1966,7 @@ function OAuthStatusMessage({
             ? variant === 'openai-official-responses'
               ? 'Using official OpenAI endpoint:'
               : variant === 'gemini-ai-studio'
-                ? 'Using official Google Gemini endpoint:'
+                ? 'Using official Google AI Studio endpoint:'
                 : 'Using preset endpoint:'
             : oauthStatus.provider === 'openai-like'
               ? oauthStatus.authMode === 'responses'
@@ -2058,10 +2050,14 @@ function OAuthStatusMessage({
                   return;
                 }
                 if (oauthStatus.step === 'apiKey') {
-                  if (oauthStatus.variant === 'openai-official-responses' || oauthStatus.variant === 'gemini-ai-studio') {
+                  if (oauthStatus.variant === 'gemini-ai-studio') {
+                    setOAuthStatus({ state: 'provider_select' });
+                    return;
+                  }
+                  if (oauthStatus.variant === 'openai-official-responses') {
                     setOAuthStatus({
                       state: 'provider_variant_select',
-                      group: getSelectionGroupForVariant(oauthStatus.variant) ?? 'custom',
+                      group: 'openai',
                     });
                     return;
                   }
