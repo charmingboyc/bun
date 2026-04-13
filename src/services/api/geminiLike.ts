@@ -545,7 +545,7 @@ function mapFinishReason(reason: string | undefined): BetaMessage['stop_reason']
 
 function joinBaseUrl(baseURL: string, path: string): string {
   const normalizedBaseURL = baseURL.trim().replace(/\/+$/, '')
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  const normalizedPath = path.replace(/^\/+/, '')
   try {
     return new URL(normalizedPath, `${normalizedBaseURL}/`).toString()
   } catch {
