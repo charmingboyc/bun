@@ -1,3 +1,4 @@
+import { APIError } from '@anthropic-ai/sdk'
 import type {
   BetaMessage,
   BetaMessageParam,
@@ -665,8 +666,11 @@ export async function createGeminiVertexStream(input: {
     } catch {
       responseText = ''
     }
-    throw new Error(
+    throw APIError.generate(
+      response.status,
+      undefined,
       `Gemini Vertex-compatible request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+      response.headers,
     )
   }
 
@@ -707,8 +711,11 @@ export async function fetchGeminiVertexResponse(input: {
     } catch {
       responseText = ''
     }
-    throw new Error(
+    throw APIError.generate(
+      response.status,
+      undefined,
       `Gemini Vertex-compatible request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+      response.headers,
     )
   }
 
@@ -884,8 +891,11 @@ export async function createGeminiCliStream(input: {
         await sleep(delayMs, input.signal)
         continue
       }
-      throw new Error(
+      throw APIError.generate(
+        response.status,
+        undefined,
         `Gemini CLI request failed with status ${response.status}${errorText ? `: ${errorText}` : ''}`,
+        response.headers,
       )
     } catch (error) {
       if (error instanceof Error) {

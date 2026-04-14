@@ -1,3 +1,4 @@
+import { APIError } from '@anthropic-ai/sdk'
 import type {
   BetaMessage,
   BetaMessageParam,
@@ -1422,8 +1423,11 @@ export async function createOpenAICompatStream(
     } catch {
       responseText = ''
     }
-    throw new Error(
+    throw APIError.generate(
+      response.status,
+      undefined,
       `OpenAI compatible request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+      response.headers,
     )
   }
 
@@ -1456,8 +1460,11 @@ export async function createOpenAICodexStream(
     } catch {
       responseText = ''
     }
-    throw new Error(
+    throw APIError.generate(
+      response.status,
+      undefined,
       `OpenAI Codex request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+      response.headers,
     )
   }
 
@@ -1490,8 +1497,11 @@ export async function createOpenAIResponsesStream(
     } catch {
       responseText = ''
     }
-    throw new Error(
+    throw APIError.generate(
+      response.status,
+      undefined,
       `OpenAI Responses request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+      response.headers,
     )
   }
 
@@ -1535,8 +1545,11 @@ export async function createCopilotChatStream(
     } catch {
       responseText = ''
     }
-    throw new Error(
+    throw APIError.generate(
+      response.status,
+      undefined,
       `GitHub Copilot chat request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+      response.headers,
     )
   }
 
@@ -1548,6 +1561,58 @@ function parseSSEChunk(buffer: string): { events: string[]; remainder: string } 
   const parts = normalized.split('\n\n')
   const remainder = parts.pop() ?? ''
   return { events: parts, remainder }
+}
+
+const MAX_EMPTY_STREAM_RETRIES = 2
+const EMPTY_STREAM_BASE_DELAY_MS = 500
+
+function shouldRetryOpenAIStreamingParseError(message: string): boolean {
+  return message.includes('[openaiCompat] failed to parse JSON')
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request was aborted'))
+      return
+    }
+    const timeout = setTimeout(resolve, ms)
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timeout)
+      reject(new Error('Request was aborted'))
+    })
+  })
+}
+
+export async function* createAnthropicStreamFromOpenAIWithEmptyRetry(input: {
+  reader: ReadableStreamDefaultReader<Uint8Array>
+  recreateReader: () => Promise<ReadableStreamDefaultReader<Uint8Array>>
+  generatorFactory: (reader: ReadableStreamDefaultReader<Uint8Array>) => AsyncGenerator<BetaRawMessageStreamEvent, BetaMessage, void>
+  model: string
+  signal?: AbortSignal
+}): AsyncGenerator<BetaRawMessageStreamEvent, BetaMessage, void> {
+  let reader = input.reader
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return yield* input.generatorFactory(reader)
+    } catch (error) {
+      const normalizedError =
+        error instanceof Error ? error : new Error(String(error))
+      const shouldRetryEmptyResponse =
+        shouldRetryOpenAIStreamingParseError(normalizedError.message) &&
+        attempt < MAX_EMPTY_STREAM_RETRIES
+
+      if (shouldRetryEmptyResponse) {
+        await reader.cancel().catch(() => {})
+        await sleep(EMPTY_STREAM_BASE_DELAY_MS * 2 ** attempt, input.signal)
+        reader = await input.recreateReader()
+        continue
+      }
+
+      throw normalizedError
+    }
+  }
 }
 
 function mapFinishReason(reason: string | null | undefined): BetaMessage['stop_reason'] {
@@ -1596,7 +1661,16 @@ export async function* createAnthropicStreamFromOpenAI(input: {
 
       for (const data of dataLines) {
         if (!data || data === '[DONE]') continue
-        const chunk = JSON.parse(data) as OpenAIStreamChunk
+
+        let chunk: OpenAIStreamChunk
+        try {
+          chunk = JSON.parse(data) as OpenAIStreamChunk
+        } catch (e) {
+          throw new Error(
+            `[openaiCompat] failed to parse JSON from stream chunk: ${String(data).slice(0, 500)}`,
+          )
+        }
+
         if (!chunk || typeof chunk !== 'object') {
           throw new Error(
             `[openaiCompat] invalid stream chunk: ${String(data).slice(0, 500)}`,
@@ -1847,7 +1921,16 @@ export async function* createAnthropicStreamFromOpenAIResponses(input: {
 
       for (const data of dataLines) {
         if (!data || data === '[DONE]') continue
-        const event = JSON.parse(data) as ResponsesStreamEvent
+
+        let event: ResponsesStreamEvent
+        try {
+          event = JSON.parse(data) as ResponsesStreamEvent
+        } catch (e) {
+          throw new Error(
+            `[openaiCompat] failed to parse JSON from stream chunk: ${String(data).slice(0, 500)}`,
+          )
+        }
+
         if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
           continue
         }

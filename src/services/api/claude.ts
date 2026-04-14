@@ -33,6 +33,7 @@ import {
   convertAnthropicRequestToOpenAICodex,
   convertAnthropicRequestToOpenAIResponses,
   createAnthropicStreamFromOpenAI,
+  createAnthropicStreamFromOpenAIWithEmptyRetry,
   createAnthropicStreamFromOpenAIResponses,
   createAnthropicStreamFromOpenAICodex,
   createCopilotChatStream,
@@ -2078,9 +2079,30 @@ async function* queryModel(
                   signal,
                 )
                 queryCheckpoint('query_response_headers_received')
-                return createAnthropicStreamFromOpenAIResponses({
+                return createAnthropicStreamFromOpenAIWithEmptyRetry({
                   reader,
+                  recreateReader: () =>
+                    createOpenAIResponsesStream(
+                      {
+                        apiKey: providerWithFreshTokens.apiKey || '',
+                        baseURL: providerWithFreshTokens.baseURL ?? customApiStorage.baseURL ?? '',
+                        headers: copilotRequestHeaders,
+                        fetch: globalThis.fetch,
+                      },
+                      convertAnthropicRequestToOpenAIResponses({
+                        model: params.model,
+                        system: params.system,
+                        messages: messagesForAPI.map(msg => msg.message as MessageParam),
+                        tools: params.tools,
+                        tool_choice: params.tool_choice,
+                        temperature: params.temperature,
+                        max_tokens: params.max_tokens,
+                      }),
+                      signal,
+                    ),
+                  generatorFactory: reader => createAnthropicStreamFromOpenAIResponses({ reader, model: params.model }),
                   model: params.model,
+                  signal,
                 }) as unknown as Stream<BetaRawMessageStreamEvent>
               }
 
@@ -2103,9 +2125,30 @@ async function* queryModel(
                 signal,
               )
               queryCheckpoint('query_response_headers_received')
-              return createAnthropicStreamFromOpenAI({
+              return createAnthropicStreamFromOpenAIWithEmptyRetry({
                 reader,
+                recreateReader: () =>
+                  createCopilotChatStream(
+                    {
+                      apiKey: providerWithFreshTokens.apiKey || '',
+                      baseURL: providerWithFreshTokens.baseURL ?? customApiStorage.baseURL ?? '',
+                      headers: copilotRequestHeaders,
+                      fetch: globalThis.fetch,
+                    },
+                    convertAnthropicRequestToOpenAI({
+                      model: params.model,
+                      system: params.system,
+                      messages: params.messages,
+                      tools: params.tools,
+                      tool_choice: params.tool_choice,
+                      temperature: params.temperature,
+                      max_tokens: params.max_tokens,
+                    }),
+                    signal,
+                  ),
+                generatorFactory: reader => createAnthropicStreamFromOpenAI({ reader, model: params.model }),
                 model: params.model,
+                signal,
               }) as unknown as Stream<BetaRawMessageStreamEvent>
             }
 
@@ -2133,9 +2176,24 @@ async function* queryModel(
               signal,
             )
             queryCheckpoint('query_response_headers_received')
-            return createAnthropicStreamFromOpenAICodex({
+            return createAnthropicStreamFromOpenAIWithEmptyRetry({
               reader,
+              recreateReader: () =>
+                createOpenAICodexStream(
+                  {
+                    apiKey: (effectiveOpenAIProvider?.apiKey ?? process.env.CLOAI_API_KEY) || '',
+                    baseURL: effectiveOpenAIProvider?.baseURL ?? customApiStorage.baseURL,
+                    headers: clientRequestId
+                      ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
+                      : undefined,
+                    fetch: globalThis.fetch,
+                  },
+                  openAICodexRequest,
+                  signal,
+                ),
+              generatorFactory: reader => createAnthropicStreamFromOpenAICodex({ reader, model: params.model }),
               model: params.model,
+              signal,
             }) as unknown as Stream<BetaRawMessageStreamEvent>
           }
 
@@ -2162,9 +2220,24 @@ async function* queryModel(
               signal,
             )
             queryCheckpoint('query_response_headers_received')
-            return createAnthropicStreamFromOpenAIResponses({
+            return createAnthropicStreamFromOpenAIWithEmptyRetry({
               reader,
+              recreateReader: () =>
+                createOpenAIResponsesStream(
+                  {
+                    apiKey: process.env.CLOAI_API_KEY || '',
+                    baseURL: activeOpenAIProvider?.baseURL ?? customApiStorage.baseURL,
+                    headers: clientRequestId
+                      ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
+                      : undefined,
+                    fetch: globalThis.fetch,
+                  },
+                  openAIResponsesRequest,
+                  signal,
+                ),
+              generatorFactory: reader => createAnthropicStreamFromOpenAIResponses({ reader, model: params.model }),
               model: params.model,
+              signal,
             }) as unknown as Stream<BetaRawMessageStreamEvent>
           }
 
@@ -2195,9 +2268,24 @@ async function* queryModel(
             signal,
           )
           queryCheckpoint('query_response_headers_received')
-          return createAnthropicStreamFromOpenAI({
+          return createAnthropicStreamFromOpenAIWithEmptyRetry({
             reader,
+            recreateReader: () =>
+              createOpenAICompatStream(
+                {
+                  apiKey: process.env.CLOAI_API_KEY || '',
+                  baseURL: process.env.ANTHROPIC_BASE_URL || '',
+                  headers: clientRequestId
+                    ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }
+                    : undefined,
+                  fetch: globalThis.fetch,
+                },
+                openAIRequest,
+                signal,
+              ),
+            generatorFactory: reader => createAnthropicStreamFromOpenAI({ reader, model: params.model }),
             model: params.model,
+            signal,
           }) as unknown as Stream<BetaRawMessageStreamEvent>
         }
 

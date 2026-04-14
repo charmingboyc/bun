@@ -768,6 +768,12 @@ function shouldRetry(error: APIError): boolean {
     return !isClaudeAISubscriber() || isEnterpriseSubscriber()
   }
 
+  // Retry on 403s from third-party providers/gateways which can be transient
+  // (e.g. Cloudflare, various API gateways). First-party 403s (revoked) are handled above.
+  if (error.status === 403) {
+    return true
+  }
+
   // Clear API key cache on 401 and allow retry.
   // OAuth token handling is done in the main retry loop via handleOAuth401Error.
   if (error.status === 401) {
