@@ -19,7 +19,7 @@
 
 ## 近期重要更新
 
-更新于 **2026 年 4 月 18 日**
+更新于 **2026 年 4 月 19 日**
 
 - ⭐ **新增 GitHub Copilot / Codex OAuth 的 GPT 系列模型缓存支持**：补齐对应 OpenAI-compatible 路径上的 Responses 缓存命中能力。
 
@@ -807,10 +807,14 @@ cloai
 
 ## 详细更新日志
 
+### 2026 年 4 月 19 日更新
+
+- 重构 openai-like 兼容端点，使得在`/v1`端点前带有其他端点的模型提供商也可以接入，例如`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`。
+- 默认关闭 openai 模型的并行工具调用功能，因为并行工具调用会扰乱上下文缓存和模型理解。可在`/config`中重新打开。
+
 ### 2026 年 4 月 18 日更新
 
-- 同步“近期重要更新”日期为 **2026 年 4 月 18 日**。
-- 新增 GitHub Copilot / Codex OAuth 的 GPT 系列模型缓存支持，补齐这两条 OpenAI-compatible 路径上的缓存命中能力。
+- 新增 GitHub Copilot 的 GPT 系列模型缓存支持，补齐这两条 OpenAI-compatible 路径上的缓存命中能力。
 - 修复过去缓存只能命中前缀、无法持续扩展的问题；现在多轮工具调用下缓存可继续向后增长，而不再长期卡死在前面一小段前缀。
 
 ### 2026 年 4 月 16 日更新
