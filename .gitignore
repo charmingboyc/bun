@@ -12,6 +12,8 @@ build/
 coverage/
 .cache/
 .turbo/
+__pycache__/
+*.pyc
 
 *.log
 *.tmp
