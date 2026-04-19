@@ -3,6 +3,10 @@ import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { CLAUDE_CODE_GUIDE_AGENT } from './built-in/claudeCodeGuideAgent.js'
+import { ASHARE_CHIEF_ANALYST_AGENT } from './built-in/ashareChiefAnalystAgent.js'
+import { ASHARE_FUNDAMENTAL_ANALYST_AGENT } from './built-in/ashareFundamentalAnalystAgent.js'
+import { ASHARE_RISK_ANALYST_AGENT } from './built-in/ashareRiskAnalystAgent.js'
+import { ASHARE_TECHNICAL_ANALYST_AGENT } from './built-in/ashareTechnicalAnalystAgent.js'
 import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { PLAN_AGENT } from './built-in/planAgent.js'
@@ -45,6 +49,10 @@ export function getBuiltInAgents(): AgentDefinition[] {
   const agents: AgentDefinition[] = [
     GENERAL_PURPOSE_AGENT,
     STATUSLINE_SETUP_AGENT,
+    ASHARE_TECHNICAL_ANALYST_AGENT,
+    ASHARE_FUNDAMENTAL_ANALYST_AGENT,
+    ASHARE_RISK_ANALYST_AGENT,
+    ASHARE_CHIEF_ANALYST_AGENT,
   ]
 
   if (areExplorePlanAgentsEnabled()) {

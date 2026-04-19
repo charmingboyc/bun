@@ -34,6 +34,8 @@ import { GLOB_TOOL_NAME } from 'src/tools/GlobTool/prompt.js'
 import { GREP_TOOL_NAME } from 'src/tools/GrepTool/prompt.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
 import { ASK_USER_QUESTION_TOOL_NAME } from '../tools/AskUserQuestionTool/prompt.js'
+import { ASHARE_DATA_TOOL_NAME } from '../tools/AshareDataTool/prompt.js'
+import { ASHARE_RESEARCH_STATE_TOOL_NAME } from '../tools/AshareResearchStateTool/prompt.js'
 import {
   EXPLORE_AGENT,
   EXPLORE_AGENT_MIN_QUERIES,
@@ -360,6 +362,9 @@ function getSessionSpecificGuidanceSection(
   const hasSkills =
     skillToolCommands.length > 0 && enabledTools.has(SKILL_TOOL_NAME)
   const hasAgentTool = enabledTools.has(AGENT_TOOL_NAME)
+  const hasAshareTools =
+    enabledTools.has(ASHARE_DATA_TOOL_NAME) &&
+    enabledTools.has(ASHARE_RESEARCH_STATE_TOOL_NAME)
   const searchTools = hasEmbeddedSearchTools()
     ? `\`find\` or \`grep\` via the ${BASH_TOOL_NAME} tool`
     : `the ${GLOB_TOOL_NAME} or ${GREP_TOOL_NAME}`
@@ -371,6 +376,18 @@ function getSessionSpecificGuidanceSection(
     getIsNonInteractiveSession()
       ? null
       : `If you need the user to run a shell command themselves (e.g., an interactive login like \`gcloud auth login\`), suggest they type \`! <command>\` in the prompt — the \`!\` prefix runs the command in this session so its output lands directly in the conversation.`,
+    hasAgentTool && hasAshareTools
+      ? `When the user asks for mainland China A-share single-stock analysis, orchestrate the A-share specialists yourself: use ${AGENT_TOOL_NAME} with subagent_type=\`ashare-technical-analyst\`, \`ashare-fundamental-analyst\`, and \`ashare-risk-analyst\`; then use ${AGENT_TOOL_NAME} with subagent_type=\`ashare-chief-analyst\` to synthesize the final Chinese report. After a complete report, ensure the active analysis is saved via ${ASHARE_RESEARCH_STATE_TOOL_NAME}.`
+      : null,
+    hasAshareTools
+      ? `When the user is following up on an earlier A-share report, first call ${ASHARE_RESEARCH_STATE_TOOL_NAME} with \`load_active_analysis\`. Refresh only the specialist views that matter to the new question, and keep the answer in Chinese.`
+      : null,
+    hasAshareTools
+      ? `When the user provides a Chinese A-share stock name instead of a 6-digit code, pass the Chinese name directly to ${ASHARE_DATA_TOOL_NAME}; the tool can resolve the stock name to the correct code.`
+      : null,
+    hasAshareTools
+      ? `When the user asks about weekdays, whether a date is a trading day, or what the next A-share trading day is, do not infer it from memory. Call ${ASHARE_DATA_TOOL_NAME} with \`trading_calendar_summary\` first, then answer in Chinese using the returned calendar facts.`
+      : null,
     // isForkSubagentEnabled() reads getIsNonInteractiveSession() — must be
     // post-boundary or it fragments the static prefix on session type.
     hasAgentTool ? getAgentToolSection() : null,

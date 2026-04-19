@@ -8,6 +8,7 @@ import type {
 } from 'src/types/message.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { PermissionMode } from '../../types/permissions.js'
+import { buildAsharePromptHints } from '../../quant/promptHints.js'
 import { createUserMessage } from '../messages.js'
 import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js'
 import { startInteractionSpan } from '../telemetry/sessionTracing.js'
@@ -58,6 +59,16 @@ export function processTextPrompt(
 
   const isNegative = matchesNegativeKeyword(userPromptText)
   const isKeepGoing = matchesKeepGoingKeyword(userPromptText)
+  const ashareHintMessages =
+    typeof input === 'string'
+      ? buildAsharePromptHints(userPromptText).map(content =>
+          createUserMessage({
+            content,
+            isMeta: true,
+            permissionMode,
+          }),
+        )
+      : []
   logEvent('tengu_input_prompt', {
     is_negative: isNegative,
     is_keep_going: isKeepGoing,
@@ -81,7 +92,7 @@ export function processTextPrompt(
     })
 
     return {
-      messages: [userMessage, ...attachmentMessages],
+      messages: [userMessage, ...attachmentMessages, ...ashareHintMessages],
       shouldQuery: true,
     }
   }
@@ -94,7 +105,7 @@ export function processTextPrompt(
   })
 
   return {
-    messages: [userMessage, ...attachmentMessages],
+    messages: [userMessage, ...attachmentMessages, ...ashareHintMessages],
     shouldQuery: true,
   }
 }
