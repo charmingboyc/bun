@@ -21,7 +21,7 @@
 
 更新于 **2026 年 4 月 19 日**
 
-- ⭐ **新增 GitHub Copilot / Codex OAuth 的 GPT 系列模型缓存支持**：补齐对应 OpenAI-compatible 路径上的 Responses 缓存命中能力。
+- ⭐ **新增 GitHub Copilot OAuth 的 GPT 系列模型缓存支持**：补齐对应 OpenAI-compatible 路径上的 Responses 缓存命中能力。
 
 - ⭐ **`/login` 登录体系重写**：新增账号管理、Provider 分组、官方/自定义子菜单、分步配置与 OAuth 回填，整个登录链路从一次性录入升级为可持续管理的闭环。
 - ⭐ **正式支持 GitHub Copilot OAuth**：已实测 `gpt-5-mini`、`claude-haiku-4.5`、`gemini-3-flash-preview`，并补齐 OpenAI OAuth、Google AI Studio、Google Antigravity (OAuth) 等官方线路。
